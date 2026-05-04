@@ -98,6 +98,13 @@ const uniforms = {
     uSkyTex:      { value: null },
     uSkyRot:      { value: 0.0 },
 
+    // Hotspot (orbiting Gaussian blob on Keplerian circular orbit)
+    uHot:         { value: 0.0 },        // 0/1 enable
+    uHotR:        { value: 6.0 },        // orbital radius (M)
+    uHotW:        { value: 0.6 },        // gaussian sigma (M)
+    uHotBrt:      { value: 1.0 },        // brightness multiplier
+    uHotPhi:      { value: 0.0 },        // current azimuthal phase (JS-driven)
+
     // Bipolar jet
     uJet:         { value: 0.0 },        // 0/1 enable
     uJetBeta:     { value: 0.85 },       // bulk velocity / c
@@ -137,6 +144,12 @@ uniform float uTpeakK;
 uniform int   uHasSky;
 uniform sampler2D uSkyTex;
 uniform float uSkyRot;
+
+uniform float uHot;
+uniform float uHotR;
+uniform float uHotW;
+uniform float uHotBrt;
+uniform float uHotPhi;
 
 uniform float uJet;
 uniform float uJetBeta;
@@ -390,12 +403,11 @@ void main() {
 
         rk4StepCart(x, p, uMass, a, dl);
 
-        // Equatorial-plane crossing: disk lives in the y=0 plane.
-        // Only count a hit when the crossing radius lands inside
-        // [r_in, r_out] — lensed rays passing through the inner shadow gap
-        // shouldn't burn a slot of MAX_DISK_HITS, or the photon-ring
-        // secondary images get truncated.
-        if (uShowDisk > 0.5 && diskHits < MAX_DISK_HITS &&
+        // Equatorial-plane crossing: disk and hotspot both live in y=0.
+        // diskHits counter gates MAX_DISK_HITS budget so lensed re-crossings
+        // don't infinitely stack.
+        bool wantEquatorial = (uShowDisk > 0.5 || uHot > 0.5);
+        if (wantEquatorial && diskHits < MAX_DISK_HITS &&
             prev_x.y * x.y < 0.0)
         {
             float fr   = prev_x.y / (prev_x.y - x.y);
@@ -404,30 +416,37 @@ void main() {
             vec3  pHit = mix(prev_p, p, fr);
             float rd   = length(hit.xz);
 
-            if (rd > uDiskInner && rd < uDiskOuter) {
-                // Doppler/beaming: photon vs disk-fluid Keplerian flow.
-                // L_z (about BH spin axis ŷ) = (hit × pHit)·ŷ.
-                float Lz = hit.z * pHit.x - hit.x * pHit.z;
+            // Doppler/beaming: photon vs disk-fluid Keplerian flow.
+            // L_z (about BH spin axis ŷ) = (hit × pHit)·ŷ.
+            float Lz = hit.z * pHit.x - hit.x * pHit.z;
 
-                // Disk element on circular Keplerian orbit (Kerr formula
-                // retained as a leading-order proxy; exact in Schwarzschild):
-                //   Ω = 1/(r^{3/2}/√M ± a)   (prograde +, retrograde −)
-                //   u^t = 1/√(1 − 3M/r + 2a√(M/r³))
-                float Omega  = uSpinDir / (pow(rd, 1.5)/sqrt(uMass) + uSpinDir * a);
-                float gtt0   = 1.0 - 2.0*uMass/rd;
-                float gtp0   = -2.0*uMass*a/rd;
-                float gpp0   = (rd*rd + a*a + 2.0*uMass*a*a/rd);
-                float denomU = max(gtt0 - 2.0*Omega*(-gtp0) - Omega*Omega*gpp0, 1e-3);
-                float u_t    = 1.0 / sqrt(denomU);
-                float u_p    = Omega * u_t;
+            // Disk element on circular Keplerian orbit (Kerr formula retained
+            // as a leading-order proxy; exact in Schwarzschild):
+            //   Ω = 1/(r^{3/2}/√M ± a)   (prograde +, retrograde −)
+            //   u^t = 1/√(1 − 3M/r + 2a√(M/r³))
+            float Omega  = uSpinDir / (pow(rd, 1.5)/sqrt(uMass) + uSpinDir * a);
+            float gtt0   = 1.0 - 2.0*uMass/rd;
+            float gtp0   = -2.0*uMass*a/rd;
+            float gpp0   = (rd*rd + a*a + 2.0*uMass*a*a/rd);
+            float denomU = max(gtt0 - 2.0*Omega*(-gtp0) - Omega*Omega*gpp0, 1e-3);
+            float u_t    = 1.0 / sqrt(denomU);
+            float u_p    = Omega * u_t;
 
-                // Photon's frequency in disk-fluid frame: ω_em = −p_μ u^μ
-                // = E u_t − L_z u^φ, with E = 1 (gauge). Sky frequency is E,
-                // so D = 1/(u_t − L_z u^φ), intensity ~ D⁴.
-                float omegaEm = u_t - Lz * u_p;
-                float D       = 1.0 / max(omegaEm, 1e-3);
-                float boost   = pow(D, 4.0);
+            // Photon's frequency in disk-fluid frame: ω_em = −p_μ u^μ
+            // = E u_t − L_z u^φ, with E = 1 (gauge). Sky frequency is E,
+            // so D = 1/(u_t − L_z u^φ), intensity ~ D⁴.
+            float omegaEm = u_t - Lz * u_p;
+            float D       = 1.0 / max(omegaEm, 1e-3);
+            float boost   = pow(D, 4.0);
 
+            // Track whether anything actually emitted this crossing — only
+            // burn a MAX_DISK_HITS slot when something rendered. Otherwise
+            // lensed rays passing through the inner shadow gap waste hits
+            // and photon-ring secondary images get truncated.
+            bool emitted = false;
+
+            // ----- Disk surface emission -----
+            if (uShowDisk > 0.5 && rd > uDiskInner && rd < uDiskOuter) {
                 // Disk thickness slab path length: H / |p̂_y|.
                 float vyAbs  = abs(normalize(pHit).y);
                 float H      = uDiskH * rd;
@@ -438,8 +457,32 @@ void main() {
                 vec3 emission = diskEmission(hit) * boost;
                 accumCol += emission * alpha * (1.0 - accumA);
                 accumA   += alpha * (1.0 - accumA);
-                diskHits++;
+                emitted = true;
             }
+
+            // ----- Orbiting hotspot (Gaussian on Keplerian orbit) -----
+            // Hotspot azimuthal phase uHotPhi is JS-driven (Keplerian Ω at uHotR).
+            if (uHot > 0.5) {
+                float phH    = atan(hit.z, hit.x);
+                float dr     = rd - uHotR;
+                float dphi   = phH - uHotPhi;
+                dphi = mod(dphi + 3.14159265, 6.28318530) - 3.14159265;
+                float arc    = uHotR * dphi;
+                float dist2  = dr*dr + arc*arc;
+                float w2     = max(uHotW * uHotW, 1e-3);
+                float gauss  = exp(-dist2 / w2);
+                if (gauss > 0.001) {
+                    // Hot blue-white: a recently magnetised plasma blob.
+                    vec3 hotCol = blackbodyRGB(18000.0) *
+                                  (8.0 * uHotBrt) * gauss * boost;
+                    accumCol += hotCol * (1.0 - accumA);
+                    // Don't fully consume accumA so the disk behind still shows.
+                    accumA   += clamp(0.6 * gauss, 0.0, 1.0) * (1.0 - accumA);
+                    emitted = true;
+                }
+            }
+
+            if (emitted) diskHits++;
         }
 
         // ----- Bipolar jet (volumetric) -----
@@ -608,6 +651,12 @@ $("bSnapISCO").addEventListener("click", () => {
     $("rDi").value = ip.toFixed(2);
     $("rDi").dispatchEvent(new Event("input"));
 });
+
+// Orbiting hotspot
+bindCheck("cHot",  uniforms.uHot);
+bindRange("rHotR", "vHotR", uniforms.uHotR, (v) => v.toFixed(1));
+bindRange("rHotW", "vHotW", uniforms.uHotW);
+bindRange("rHotB", "vHotB", uniforms.uHotBrt);
 
 // Bipolar jet
 bindCheck("cJet",   uniforms.uJet);
@@ -822,6 +871,17 @@ function tick(now) {
     uniforms.uTime.value = simT;
     uniforms.uCameraPos.value.copy(camera.position);
     uniforms.uCameraMat.value.copy(camera.matrixWorld);
+
+    // ---- Hotspot azimuthal phase: prograde Keplerian orbit at uHotR ----
+    {
+        const M     = uniforms.uMass.value;
+        const a     = uniforms.uSpin.value;
+        const rh    = uniforms.uHotR.value;
+        // Same Ω the disk uses (prograde Kerr); sign follows uSpinDir.
+        const sign  = uniforms.uSpinDir.value;
+        const omega = sign / (Math.pow(rh, 1.5) / Math.sqrt(Math.max(M, 1e-3)) + sign * a);
+        uniforms.uHotPhi.value = omega * simT;
+    }
 
     composer.render();
 

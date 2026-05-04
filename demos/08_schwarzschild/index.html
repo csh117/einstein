@@ -143,6 +143,26 @@
   </details>
 
   <details>
+    <summary data-info="<strong>Orbiting hotspot</strong>: a single bright Gaussian blob on a Keplerian orbit at radius r_h. Because the ray-tracer integrates real geodesics, the hotspot appears multiple times around the photon ring — once on the disk, again as a delayed n=1 echo on the far side, then n=2 wrapping the shadow. This is the EHT 2022 Sgr A* discovery shot.">Hotspot</summary>
+
+    <div class="ctrl" data-info="Toggle hotspot rendering. Visible at any orbital radius even if the disk is hidden.">
+      <label><input id="cHot" type="checkbox" />Show hotspot</label>
+    </div>
+    <div class="ctrl" data-info="<strong>Orbital radius r_h / M</strong>: where the hotspot orbits. Closer to the BH = faster orbit, more strongly lensed echoes. Default near ISCO (6 M).">
+      <label>Orbital radius r_h / M <span class="val" id="vHotR">6.0</span></label>
+      <input id="rHotR" type="range" min="1.5" max="20.0" step="0.1" value="6.0" />
+    </div>
+    <div class="ctrl" data-info="<strong>Width σ</strong>: Gaussian half-width in M units. Larger = puffier blob.">
+      <label>Width σ / M <span class="val" id="vHotW">0.60</span></label>
+      <input id="rHotW" type="range" min="0.1" max="2.0" step="0.05" value="0.6" />
+    </div>
+    <div class="ctrl" data-info="<strong>Brightness</strong>: emission multiplier. Hotspot color is fixed at ~18000 K (hot blue-white).">
+      <label>Brightness <span class="val" id="vHotB">1.00</span></label>
+      <input id="rHotB" type="range" min="0.0" max="5.0" step="0.05" value="1.0" />
+    </div>
+  </details>
+
+  <details>
     <summary data-info="<strong>Bipolar jet</strong>: relativistic plasma streams along the BH spin axis (±y). The near-side jet is Doppler-boosted toward you (bright); the far-side is dimmed (often invisible — this is why AGN jets look 'one-sided'). For best effect, set spin ≳ 0.5 and try the SMBH or Quasar preset first.">Jet</summary>
 
     <div class="ctrl" data-info="Toggle jet rendering.">
