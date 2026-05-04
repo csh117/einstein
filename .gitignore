@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Manim
+media/
+manim/media/
+
+# Node / web
+node_modules/
+.cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated assets (re-generate via scripts)
+assets/skyboxes/*.exr
+assets/skyboxes/*.hdr
+physics/_export/*.json
+
+# Local scaffolding (frill re-add backups)
+*.bak
+
+# Claude Code local settings (per-user)
+.claude/settings.local.json

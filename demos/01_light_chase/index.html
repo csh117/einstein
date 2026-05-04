@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Einstein - Light is Stubborn</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #02030c;
+               overflow: hidden;
+               font-family: ui-sans-serif, system-ui, sans-serif; color: #ddd; }
+  #gl { display: block; width: 100vw; height: 100vh; }
+
+  /* ---- Big neon title ---- */
+  #title {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    text-align: center; pointer-events: none;
+    font-weight: 900; letter-spacing: 4px;
+    z-index: 30;
+  }
+  #title .main {
+    font-size: 30px; color: #ff6ad5;
+    text-shadow:
+      0 0 6px  #ff6ad5,
+      0 0 16px #ff6ad5,
+      0 0 26px #c44ad5;
+  }
+  #title .sub {
+    display: block; font-size: 11px; color: #5fffe0; opacity: 0.95;
+    letter-spacing: 5px; margin-top: 4px;
+    text-shadow: 0 0 6px #5fffe0;
+  }
+
+  /* ---- Pane banners ---- */
+  .panel-banner {
+    position: fixed; top: 84px; padding: 12px 18px;
+    border-radius: 12px; backdrop-filter: blur(8px);
+    font-size: 14px; line-height: 1.35; pointer-events: none;
+    border: 1px solid;
+    max-width: 360px; z-index: 25;
+  }
+  .panel-banner .badge { display: inline-block; padding: 2px 10px;
+    border-radius: 999px; font-size: 10px; font-weight: 800;
+    letter-spacing: 1.5px; text-transform: uppercase; }
+  .panel-banner h2 { margin: 6px 0 4px; font-size: 18px; font-weight: 800; }
+  .panel-banner .what { font-size: 12px; opacity: 0.92; }
+  .panel-banner b    { color: #fff; }
+
+  #panelL {
+    left: 14px;
+    background: rgba(80, 30, 60, 0.55);
+    border-color: rgba(255, 106, 213, 0.55);
+    box-shadow: 0 0 22px rgba(255, 106, 213, 0.35);
+  }
+  #panelL .badge { background: #ff6ad5; color: #1a0a14; }
+  #panelL h2     { color: #ffacf0; text-shadow: 0 0 8px rgba(255,106,213,0.6); }
+
+  #panelR {
+    right: 14px; text-align: right;
+    background: rgba(20, 50, 80, 0.55);
+    border-color: rgba(95, 255, 224, 0.55);
+    box-shadow: 0 0 22px rgba(95, 255, 224, 0.35);
+  }
+  #panelR .badge { background: #5fffe0; color: #0a1814; }
+  #panelR h2     { color: #a3ffe8; text-shadow: 0 0 8px rgba(95,255,224,0.6); }
+
+  /* ---- Speedometer panels ---- */
+  .speedo {
+    position: fixed; top: 220px; padding: 12px 16px;
+    border-radius: 12px; backdrop-filter: blur(8px);
+    font-size: 13px; max-width: 260px; pointer-events: none;
+    border: 1px solid; z-index: 25;
+  }
+  .speedo .label  { font-size: 9px; letter-spacing: 2.5px; opacity: 0.85;
+                    font-weight: 700; }
+  .speedo .value  { font-size: 30px; font-weight: 900;
+                    font-variant-numeric: tabular-nums; line-height: 1.05;
+                    margin-top: 2px; }
+  .speedo .bar    { width: 100%; height: 8px; margin-top: 8px;
+                    background: rgba(255, 255, 255, 0.10);
+                    border-radius: 4px; overflow: hidden; }
+  .speedo .bar-fill { height: 100%; border-radius: 4px;
+                      transition: width 0.06s; }
+  .speedo .verdict { font-size: 10px; letter-spacing: 1.5px; margin-top: 8px;
+                     font-weight: 800; text-transform: uppercase; }
+
+  #speedoL { left: 14px;
+    background: rgba(80, 30, 60, 0.65);
+    border-color: rgba(255, 106, 213, 0.45);
+  }
+  #speedoL .label   { color: #ffacf0; }
+  #speedoL .value   { color: #ffd3f1; text-shadow: 0 0 12px #ff6ad5; }
+  #speedoL .bar-fill { background: linear-gradient(90deg, #ff6ad5, #ffd3f1);
+                       box-shadow: 0 0 8px #ff6ad5; }
+  #speedoL .verdict { color: #ffacf0; }
+
+  #speedoR { right: 14px; text-align: right;
+    background: rgba(20, 50, 80, 0.65);
+    border-color: rgba(95, 255, 224, 0.45);
+  }
+  #speedoR .label   { color: #a3ffe8; }
+  #speedoR .value   { color: #d3fff5; text-shadow: 0 0 12px #5fffe0; }
+  #speedoR .bar-fill { background: linear-gradient(90deg, #5fffe0, #d3fff5);
+                       box-shadow: 0 0 8px #5fffe0; }
+  #speedoR .verdict { color: #a3ffe8; }
+
+  /* ---- Big bottom slider ---- */
+  #sliderBox {
+    position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%);
+    width: 520px; max-width: 84vw;
+    background: rgba(8, 10, 26, 0.85);
+    border: 1px solid rgba(190, 130, 255, 0.35);
+    border-radius: 12px; padding: 14px 22px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 0 26px rgba(170, 100, 240, 0.30);
+    text-align: center; z-index: 30;
+  }
+  #sliderBox .label { font-size: 11px; letter-spacing: 4px;
+                      color: #c8a6ff; opacity: 0.92; font-weight: 700; }
+  #sliderBox .value { font-size: 28px; font-weight: 900;
+                      color: #fff; font-variant-numeric: tabular-nums;
+                      text-shadow: 0 0 12px #c8a6ff; line-height: 1.1; }
+  #rBeta { width: 100%; margin-top: 8px; -webkit-appearance: none;
+           appearance: none; background: transparent; }
+  #rBeta::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, #5fffe0, #ff6ad5);
+    height: 8px; border-radius: 4px;
+    box-shadow: 0 0 10px rgba(170, 100, 240, 0.4);
+  }
+  #rBeta::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; cursor: pointer; margin-top: -7px;
+    box-shadow: 0 0 14px #fff, 0 0 8px #c8a6ff;
+  }
+  #rBeta::-moz-range-track {
+    background: linear-gradient(90deg, #5fffe0, #ff6ad5);
+    height: 8px; border-radius: 4px;
+  }
+  #rBeta::-moz-range-thumb {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; cursor: pointer; border: none;
+    box-shadow: 0 0 14px #fff;
+  }
+
+  /* ---- Bottom takeaway ---- */
+  #takeaway {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: rgba(8, 10, 26, 0.92); padding: 12px 24px; border-radius: 10px;
+    border: 1px solid rgba(95, 255, 224, 0.3);
+    font-size: 14px; color: #e6ecf2; max-width: 80vw;
+    text-align: center; line-height: 1.4;
+    pointer-events: none; z-index: 30;
+  }
+  #takeaway b { color: #5fffe0; }
+  #takeaway .punch { color: #ff6ad5; font-weight: 800; }
+
+  /* ---- Center divider ---- */
+  #divider { position: fixed; top: 0; left: 50%;
+             transform: translateX(-50%);
+             width: 4px; height: 100%;
+             background: linear-gradient(180deg,
+                rgba(255, 106, 213, 0.7) 0%,
+                rgba(170, 100, 240, 0.5) 50%,
+                rgba( 95, 255, 224, 0.5) 100%);
+             box-shadow: 0 0 22px rgba(180, 140, 255, 0.55),
+                         0 0 6px  rgba(255, 200, 255, 0.7);
+             pointer-events: none; z-index: 20; }
+  #divider::after {
+    content: "VS"; position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 42px; height: 42px; line-height: 42px;
+    text-align: center; font-size: 14px; font-weight: 900;
+    color: #1a0a14; letter-spacing: 1px;
+    background: linear-gradient(135deg, #ff6ad5 0%, #5fffe0 100%);
+    border-radius: 50%;
+    box-shadow: 0 0 18px rgba(180, 100, 200, 0.8),
+                inset 0 0 6px rgba(255, 240, 255, 0.4);
+    border: 2px solid rgba(255, 240, 255, 0.6);
+  }
+
+  #stats { position: fixed; bottom: 8px; right: 12px; opacity: 0.5; font-size: 11px; z-index: 30; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="title">
+  <span class="main">CAN YOU CATCH THE LIGHT?</span>
+  <span class="sub">EINSTEIN'S FIRST POSTULATE — c IS ABSOLUTE</span>
+</div>
+
+<div id="panelL" class="panel-banner">
+  <span class="badge">⚾ NORMAL PHYSICS</span>
+  <h2>The Baseball</h2>
+  <div class="what">A pitcher fires a ball at speed v_b = 0.6 c.
+    You chase it in your ship. <b>Speed up enough — you catch it.</b></div>
+</div>
+
+<div id="panelR" class="panel-banner">
+  <span class="badge">💡 EINSTEIN'S WEIRD RULE</span>
+  <h2>The Light Beam</h2>
+  <div class="what">A flashlight fires a photon at speed c.
+    You chase it. <b>No matter how fast you go — it always pulls away at c.</b></div>
+</div>
+
+<div id="speedoL" class="speedo">
+  <div class="label">BALL'S SPEED IN YOUR FRAME</div>
+  <div class="value" id="vSpeedL">0.60 c</div>
+  <div class="bar"><div class="bar-fill" id="barL" style="width:60%"></div></div>
+  <div class="verdict" id="verdictL">▶ ball drifts ahead</div>
+</div>
+
+<div id="speedoR" class="speedo">
+  <div class="label">LIGHT'S SPEED IN YOUR FRAME</div>
+  <div class="value" id="vSpeedR">1.00 c</div>
+  <div class="bar"><div class="bar-fill" id="barR" style="width:100%"></div></div>
+  <div class="verdict" id="verdictR">▶ light escapes at full c</div>
+</div>
+
+<div id="sliderBox">
+  <div class="label">YOUR SHIP SPEED β</div>
+  <div class="value" id="vBeta">0.50 c</div>
+  <input id="rBeta" type="range" min="0" max="0.99" step="0.01" value="0.5" />
+</div>
+
+<div id="divider"></div>
+
+<div id="takeaway"></div>
+<div id="stats">- fps</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

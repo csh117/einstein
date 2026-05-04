@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Einstein - Kerr-augmented Black Hole</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden;
+               font-family: ui-sans-serif, system-ui, sans-serif; color: #ddd; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; max-height: calc(100vh - 24px);
+    overflow-y: auto; padding: 10px 12px;
+    background: rgba(0,0,0,0.55); border-radius: 8px; font-size: 12px;
+    backdrop-filter: blur(4px); user-select: none;
+    border: 1px solid rgba(255,255,255,0.08);
+    width: 230px;
+  }
+  #ui details { margin: 6px 0; }
+  #ui details > summary {
+    cursor: pointer; padding: 3px 0; font-weight: 600;
+    color: #cdd6e0; outline: none; list-style: none;
+  }
+  #ui details > summary::before { content: "+ "; color: #888; }
+  #ui details[open] > summary::before { content: "- "; }
+  #ui .ctrl { margin: 5px 0 8px; cursor: help; padding: 2px 0; border-radius: 3px; }
+  #ui .ctrl:hover { background: rgba(255,255,255,0.03); }
+  #ui label { display: block; margin: 2px 0 1px; opacity: 0.85; font-size: 11px;
+              cursor: inherit; }
+  #ui input[type=range] { width: 100%; }
+  #ui input[type=text]  { width: 100%; box-sizing: border-box; padding: 3px 6px;
+                          background: #0a0e16; color: #cdd6e0; border: 1px solid #2c3a4d;
+                          border-radius: 3px; font-size: 11px; font-family: inherit; }
+  #ui input[type=checkbox] { margin-right: 4px; vertical-align: middle; }
+  #ui .row { display: flex; justify-content: space-between; gap: 8px;
+             font-variant-numeric: tabular-nums; opacity: 0.85; font-size: 11px;
+             padding: 1px 0; cursor: help; border-radius: 3px; }
+  #ui .row:hover { background: rgba(255,255,255,0.03); }
+  #ui .val { opacity: 0.65; font-variant-numeric: tabular-nums; }
+  #ui .presets { margin-top: 8px; display: grid;
+                 grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  #ui .presets button {
+    background: #1c2530; color: #cdd6e0; border: 1px solid #2c3a4d;
+    padding: 5px 6px; font-size: 11px; border-radius: 4px; cursor: help;
+    font-family: inherit;
+  }
+  #ui .presets button:hover { background: #2a3a50; }
+  #ui .resetbtn, #ui .smallbtn {
+    background: #1c2530; color: #cdd6e0; border: 1px solid #2c3a4d;
+    padding: 5px; border-radius: 4px; cursor: pointer; font-family: inherit;
+    font-size: 11px;
+  }
+  #ui .resetbtn { width: 100%; margin-top: 4px; }
+  #ui .smallbtn { padding: 3px 6px; }
+  #ui .skyrow { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 4px; }
+  #stats { position: fixed; bottom: 8px; right: 12px; opacity: 0.6; font-size: 11px; }
+  #title  { position: fixed; top: 12px; right: 12px; opacity: 0.7; font-size: 12px;
+            text-align: right; line-height: 1.4; }
+  #tip {
+    position: fixed; pointer-events: none; display: none; z-index: 1000;
+    max-width: 340px; padding: 10px 12px;
+    background: rgba(8, 12, 20, 0.97); color: #e6ecf2;
+    border: 1px solid rgba(150, 180, 220, 0.25);
+    border-radius: 6px; font-size: 12px; line-height: 1.45;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.7);
+    backdrop-filter: blur(2px);
+  }
+  #tip strong { color: #aac6ff; }
+  #tip code { font-family: ui-monospace, monospace; font-size: 11px;
+              background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="title">
+  <strong>Kerr-augmented black hole ray-marcher</strong><br/>
+  <span style="opacity:0.6">drag · scroll · hover any setting for details</span>
+</div>
+
+<div id="ui">
+
+  <details open>
+    <summary data-info="<strong>Black hole</strong>: by the no-hair theorem, a classical black hole has only three intrinsic properties — mass M, spin a, and charge Q. Astrophysical BHs are essentially uncharged, so M and a are it.">Black hole</summary>
+
+    <div class="ctrl" data-info="<strong>Mass M</strong>: the dominant length scale. Schwarzschild radius <code>r_s = 2M</code>. For our Sun, r_s ≈ 3 km; Sgr A* is ~12 million km; M87* roughly 4× larger.">
+      <label>Mass M <span class="val" id="vMass">1.00</span></label>
+      <input id="rMass" type="range" min="0.2" max="3.0" step="0.05" value="1.0" />
+    </div>
+
+    <div class="ctrl" data-info="<strong>Spin a/M</strong>: dimensionless angular momentum per unit mass, in [0, 1]. <code>a/M = 0</code> is non-spinning Schwarzschild; <code>a/M → 1</code> is extremal Kerr (an idealisation; real BHs cap near 0.998).<br/><br/>Effects you'll see in the simulation:<br/>- Outer horizon shrinks: <code>r_+ = M(1 + √(1 − (a/M)²))</code><br/>- Prograde ISCO moves inward (down to M for max spin)<br/>- Lense-Thirring frame dragging: photons get pulled in the direction of rotation, breaking the photon ring's symmetry.<br/><br/>Caveat: this demo uses Schwarzschild geodesics + a leading-order Lense-Thirring drag. Strong-field Kerr (Boyer-Lindquist Christoffels) is a future pass.">
+      <label>Spin a/M <span class="val" id="vSpin">0.000</span></label>
+      <input id="rSpin" type="range" min="0.0" max="0.998" step="0.002" value="0.0" />
+    </div>
+
+    <div class="row" data-info="<strong>r_s = 2M</strong>: Schwarzschild radius. For non-spinning BHs this is the event horizon. For spinning BHs the actual outer horizon r_+ is smaller — we use that for ray termination."><span>r_s</span><span id="vRs">2.00</span></div>
+    <div class="row" data-info="<strong>b_crit = 3√3 · M</strong> (Schwarzschild): critical impact parameter for capture. Photons launched within b_crit spiral in; outside, they escape after some deflection. Kerr breaks this into prograde/retrograde branches."><span>b_crit</span><span id="vBcrit">5.196</span></div>
+    <div class="row" data-info="<strong>r_ISCO (prograde)</strong>: Innermost Stable Circular Orbit for matter co-rotating with the BH. Computed from the Bardeen-Press-Teukolsky 1972 formula. For a/M=0: 6M. For a/M=1: 1M. The disk's natural inner edge."><span>r_ISCO+</span><span id="vIscoP">6.00</span></div>
+    <div class="row" data-info="<strong>r_ISCO (retrograde)</strong>: Innermost Stable Circular Orbit for matter counter-rotating to the BH. For a/M=0: 6M (same as prograde). For a/M=1: 9M. Counter-rotation is energetically disfavoured because frame dragging fights it."><span>r_ISCO−</span><span id="vIscoR">6.00</span></div>
+  </details>
+
+  <details open>
+    <summary data-info="<strong>Accretion disk</strong>: hot gas spiralling inward. Inner edge at ISCO; everything else (temperature profile, rotation speed, brightness asymmetry, color from temperature) is determined by physics from M, a, Ṁ, r.">Accretion disk</summary>
+
+    <div class="ctrl" data-info="<strong>Show disk</strong>: toggle off to see pure photon-ring geometry without disk emission.">
+      <label><input id="cDisk" type="checkbox" checked />Show disk</label>
+    </div>
+
+    <div class="ctrl" data-info="<strong>Accretion rate Ṁ</strong>: how much mass the disk swallows per unit time. Sets disk luminosity (<code>L ∝ Ṁ</code>) and shifts the effective peak temperature: <code>T_peak ∝ Ṁ^(1/4) / M^(3/4)</code>. The Eddington limit (~10× our default) is where radiation pressure starts blowing matter back out.">
+      <label>Accretion rate Ṁ <span class="val" id="vMdot">1.00</span></label>
+      <input id="rMdot" type="range" min="0.05" max="3.5" step="0.05" value="1.0" />
+    </div>
+
+    <div class="row" data-info="<strong>Peak disk temperature</strong>: derived from M and Ṁ via Shakura-Sunyaev: <code>T_peak ≈ 8000 K · Ṁ^(1/4) / M^(3/4)</code> (calibrated so default = 8000 K). The disk's color is then a Planck blackbody at that temperature, brightness scales as Stefan-Boltzmann <code>T⁴</code>."><span>T_peak</span><span id="vTpeak">8.0 kK</span></div>
+
+    <div class="ctrl" data-info="<strong>Inner edge r_in</strong>: where the disk truncates. Physically set by the ISCO. The 'snap to ISCO' button below auto-locks this to the current prograde Kerr ISCO.<br/><br/>Shakura-Sunyaev temperature profile: <code>T(r) ∝ (r_in/r)^(3/4) · [1 − √(r_in/r)]^(1/4)</code>. Peaks near <code>r ≈ 1.36 r_in</code>.">
+      <label>Inner edge r_in <span class="val" id="vDi">6.00</span></label>
+      <input id="rDi" type="range" min="1.05" max="12.0" step="0.05" value="6.0" />
+    </div>
+    <button id="bSnapISCO" class="resetbtn"
+      data-info="Snap r_in to the current prograde ISCO for the chosen M and a/M.">
+      Snap r_in to ISCO
+    </button>
+
+    <div class="ctrl" data-info="<strong>Outer edge r_out</strong>: how far the disk extends. Set by what's feeding the disk (donor star, gas cloud, infalling cluster), not the BH itself. Stellar BHs typically have small disks (10s of M); supermassive ones can have huge ones (1000s of M).">
+      <label>Outer edge r_out <span class="val" id="vDo">14.0</span></label>
+      <input id="rDo" type="range" min="3.0" max="50.0" step="0.1" value="14.0" />
+    </div>
+
+    <div class="ctrl" data-info="<strong>Optical depth τ</strong>: how opaque the disk gas is. Light through the disk attenuates as <code>exp(−τ_eff)</code> with <code>τ_eff = τ · (path through disk thickness)</code>. So edge-on disks are more opaque than face-on, and re-crossings near the photon ring stack emission front-to-back. Real thin disks have τ ≫ 1.">
+      <label>Optical depth τ <span class="val" id="vTau">1.50</span></label>
+      <input id="rTau" type="range" min="0.05" max="5.0" step="0.05" value="1.5" />
+    </div>
+
+    <div class="ctrl" data-info="<strong>Disk thickness H/R</strong>: scale-height-to-radius ratio. Real geometrically-thin Shakura-Sunyaev disks have H/R ≈ 0.01-0.1; slim/thick disks (super-Eddington) push H/R ≈ 0.3+. Thicker disks block more re-crossings and look puffy.">
+      <label>Disk thickness H/R <span class="val" id="vDH">0.08</span></label>
+      <input id="rDH" type="range" min="0.0" max="0.3" step="0.005" value="0.08" />
+    </div>
+
+    <div class="ctrl" data-info="<strong>Rotation direction</strong>: which way the gas orbits. Flips the Doppler-bright side of the disk. Speed itself is fixed by Keplerian physics: <code>v(r) = √(M/r) · c</code>.">
+      <label><input id="cSpin" type="checkbox" checked />Spin counter-clockwise</label>
+    </div>
+
+  </details>
+
+  <details>
+    <summary data-info="<strong>Bipolar jet</strong>: relativistic plasma streams along the BH spin axis (±y). The near-side jet is Doppler-boosted toward you (bright); the far-side is dimmed (often invisible — this is why AGN jets look 'one-sided'). For best effect, set spin ≳ 0.5 and try the SMBH or Quasar preset first.">Jet</summary>
+
+    <div class="ctrl" data-info="Toggle jet rendering.">
+      <label><input id="cJet" type="checkbox" />Show jet</label>
+    </div>
+    <div class="ctrl" data-info="<strong>Jet bulk velocity β</strong>: Lorentz speed of plasma in the jet. Real AGN jets reach β ≈ 0.99, with intensity boost <code>D⁴</code> where <code>D = 1/[γ(1−β·n̂)]</code>.">
+      <label>Jet β <span class="val" id="vJetB">0.85</span></label>
+      <input id="rJetB" type="range" min="0.0" max="0.99" step="0.01" value="0.85" />
+    </div>
+    <div class="ctrl" data-info="<strong>Half-opening angle</strong>: cone half-angle in radians. Real AGN jets have ~0.05–0.2 rad opening (3°–12°).">
+      <label>Half-angle (rad) <span class="val" id="vJetA">0.150</span></label>
+      <input id="rJetA" type="range" min="0.02" max="0.40" step="0.005" value="0.15" />
+    </div>
+    <div class="ctrl" data-info="<strong>Jet length</strong>: tip extent in units of M. Real AGN jets reach kpc–Mpc scales; here we cap to keep things in frame.">
+      <label>Length / M <span class="val" id="vJetL">25</span></label>
+      <input id="rJetL" type="range" min="5.0" max="80.0" step="1.0" value="25.0" />
+    </div>
+    <div class="ctrl" data-info="<strong>Brightness</strong>: emission multiplier on the synchrotron-ish bluish tint.">
+      <label>Brightness <span class="val" id="vJetBr">1.00</span></label>
+      <input id="rJetBr" type="range" min="0.0" max="3.0" step="0.05" value="1.0" />
+    </div>
+  </details>
+
+  <details open>
+    <summary data-info="<strong>Viewing geometry & observer motion</strong>: where the camera sits and how it moves. Inclination is the most visually decisive lever; relativistic boost activates aberration and Doppler on the starfield.">Viewing</summary>
+
+    <div class="ctrl" data-info="<strong>Inclination</strong>: angle between line of sight and disk axis.<br/>0° = face-on, 90° = edge-on, ~60° = the iconic Interstellar / EHT-M87 shot. Doppler asymmetry is most dramatic near edge-on.">
+      <label>Inclination <span class="val" id="vIncl">70°</span></label>
+      <input id="rIncl" type="range" min="0" max="90" step="1" value="70" />
+    </div>
+
+    <div class="ctrl" data-info="<strong>Camera boost β = v/c</strong>: relativistic camera motion along the auto-orbit tangent. Activates two effects on the starfield:<br/><br/><strong>Aberration</strong>: stars shift toward the direction of motion (the 'headlight effect'). At β → 1, the entire sky compresses to a small bright disc ahead of you.<br/><br/><strong>Doppler boost</strong>: stars in front blueshift and brighten by <code>D⁴</code>; stars behind redshift and dim, where <code>D = 1/[γ(1 − β·n̂)]</code>.<br/><br/>Try the 'Rel flyby' preset for a relativistic camera pass.">
+      <label>Camera boost β <span class="val" id="vBoost">0.00</span></label>
+      <input id="rBoost" type="range" min="0.0" max="0.99" step="0.01" value="0.0" />
+    </div>
+
+    <div class="ctrl" data-info="<strong>Auto-orbit</strong>: keeps the camera circling so the scene evolves on its own.">
+      <label><input id="cAuto" type="checkbox" checked />Auto-orbit</label>
+    </div>
+    <div class="ctrl" data-info="<strong>Orbit speed</strong>: angular speed of auto-orbit. 0 = stopped.">
+      <label>Orbit speed <span class="val" id="vAo">0.6</span></label>
+      <input id="rAo" type="range" min="0.0" max="3.0" step="0.05" value="0.6" />
+    </div>
+    <div class="ctrl" data-info="<strong>Field of view</strong>: camera optics, not physics. Smaller FOV = telephoto (good for photon-ring close-ups), larger = wide-angle.">
+      <label>Field of view <span class="val" id="vFov">60</span></label>
+      <input id="rFov" type="range" min="20" max="100" step="1" value="60" />
+    </div>
+    <button id="bReset" class="resetbtn"
+      data-info="Snap the camera back to the default 70° / 18-unit position.">
+      Reset camera
+    </button>
+  </details>
+
+  <details>
+    <summary data-info="<strong>Background sky</strong>: switch between a procedural starfield (default) and a user-supplied HDR equirectangular panorama (e.g. ESO/GAIA Milky Way panorama). Both undergo aberration and Doppler when the camera is boosted.">Background sky</summary>
+
+    <div class="ctrl" data-info="<strong>HDR panorama URL</strong>: paste an equirectangular sky panorama URL (JPG/PNG). Recommended: an ESO Milky Way panorama (e.g. <code>https://www.eso.org/public/archives/images/screen/eso0932a.jpg</code>) — the source must serve <code>Access-Control-Allow-Origin: *</code> for WebGL to load it.">
+      <label>Sky URL</label>
+      <input id="rSkyUrl" type="text" placeholder="https://...equirectangular.jpg" />
+    </div>
+    <div class="skyrow">
+      <button id="bLoadSky"  class="smallbtn"
+        data-info="Load the URL above as the sky panorama.">Load</button>
+      <button id="bSkyClear" class="smallbtn"
+        data-info="Drop the loaded panorama and revert to the procedural starfield.">Clear</button>
+    </div>
+    <div class="row" data-info="Status of the most recent sky-load attempt."><span>Sky</span><span id="vSkyStat">procedural</span></div>
+
+    <div class="ctrl" data-info="<strong>Sky rotation</strong>: yaw (longitudinal) rotation of the panorama, in radians. Useful to align the Milky Way band with your composition.">
+      <label>Sky rotation <span class="val" id="vSkyRot">0.00</span></label>
+      <input id="rSkyRot" type="range" min="-3.14" max="3.14" step="0.02" value="0.0" />
+    </div>
+  </details>
+
+  <details>
+    <summary data-info="<strong>Simulation parameters</strong>: numerical and render settings. Don't change physics, only how the physics is drawn.">Simulation</summary>
+
+    <div class="ctrl" data-info="<strong>Integration steps</strong>: how many RK4 steps the geodesic integrator takes per ray. More = smoother photon orbits, sharper photon ring, slower frames. Default 350 (was 500). Bump up for sharper photon rings when GPU is free.">
+      <label>Steps <span class="val" id="vSteps">350</span></label>
+      <input id="rSteps" type="range" min="150" max="1200" step="25" value="350" />
+    </div>
+    <div class="ctrl" data-info="<strong>Bloom strength</strong>: post-process bloom from HDR highlights. Camera/optics, not physics — but a touch of it makes the disk feel photographed.">
+      <label>Bloom strength <span class="val" id="vBloom">0.35</span></label>
+      <input id="rBloom" type="range" min="0.0" max="2.0" step="0.05" value="0.35" />
+    </div>
+    <div class="ctrl" data-info="<strong>Time speed</strong>: scales the simulation clock for the disk swirl animation. 0 = freeze.">
+      <label>Time speed <span class="val" id="vTs">1.00</span></label>
+      <input id="rTs" type="range" min="0.0" max="4.0" step="0.05" value="1.0" />
+    </div>
+    <div class="ctrl" data-info="<strong>Resolution scale</strong>: internal render scale. 1.0 = native pixels; lower for performance. Default 0.7 for headroom; raise to 1.0 for stills.">
+      <label>Resolution scale <span class="val" id="vRes">0.70</span></label>
+      <input id="rRes" type="range" min="0.4" max="1.5" step="0.05" value="0.7" />
+    </div>
+  </details>
+
+  <div class="presets">
+
+    <button data-preset="schwarz"
+      data-info="<strong>Schwarzschild — non-spinning reference</strong><br/><br/>The simplest BH solution: M, a=0, no charge. The textbook 1916 limit.<br/><br/><strong>What you see</strong>: perfectly symmetric photon ring at b = 3√3 M ≈ 5.20 M; ISCO at 6M; no Doppler skew from frame dragging (only Keplerian orbit beaming).<br/><br/><strong>When this occurs in nature</strong>: essentially never. Real astrophysical BHs accrete angular momentum and end up spinning. This preset is the reference baseline so you can see what spin <em>changes</em>.">Schwarzschild</button>
+
+    <button data-preset="stellar"
+      data-info="<strong>Stellar-mass BH</strong> (Cygnus X-1 archetype)<br/><br/>M ≈ 10 solar masses, a/M ≈ 0.7, Ṁ ≈ 0.1× Eddington.<br/><br/><strong>Origin</strong>: collapse of a >25 M_sun star, often in a close binary so it can accrete from a companion. Spin built up from accretion and birth.<br/><br/><strong>What you see</strong>: prograde ISCO at ~3.4M (well inside 6M), small bright disk, strong Doppler asymmetry on the approaching side. Real stellar-mass BHs peak in soft X-ray (~10⁷ K); our visible-light proxy renders the disk blue-white.<br/><br/><strong>Real examples</strong>: Cyg X-1, GRS 1915+105, V404 Cyg.">Stellar</button>
+
+    <button data-preset="smbh"
+      data-info="<strong>Supermassive BH</strong> (M87*-like)<br/><br/>M ≈ 10⁹ solar masses, a/M ≈ 0.94, sub-Eddington Ṁ.<br/><br/><strong>Origin</strong>: lives at the center of a massive galaxy; built up over Gyr by mergers and gas accretion.<br/><br/><strong>What you see</strong>: large horizon, cooler larger disk (real SMBHs peak in UV ~10⁵ K — we render reddish here). Doppler asymmetry mild because Keplerian β at 6M is fixed regardless of M.<br/><br/><strong>Real examples</strong>: M87* (EHT 2019), Sgr A* (EHT 2022). The famous EHT image is M87* at i ≈ 17°, much more face-on than this preset.">Supermassive</button>
+
+    <button data-preset="edge"
+      data-info="<strong>Edge-on view</strong> (i ≈ 88°)<br/><br/>Camera in the disk plane.<br/><br/><strong>What you see</strong>: disk crushed to a thin streak; the upper and lower 'haloes' are photons that orbit the BH 1, 2, 3 times before reaching us — these are the n=1, 2 photon-ring images. Doppler beaming is at maximum (one side of disk approaches you head-on at v ≈ 0.4c at ISCO).<br/><br/><strong>When this occurs</strong>: random orientation, ~1% of viewing geometries. Some real X-ray binaries are seen near edge-on (eclipsing systems).">Edge-on</button>
+
+    <button data-preset="face"
+      data-info="<strong>Face-on view</strong> (i ≈ 5°)<br/><br/>Looking straight down on the disk along its rotation axis.<br/><br/><strong>What you see</strong>: symmetric disk — both sides equidistant in approach/recession, so Doppler asymmetry vanishes. Pure radial T(r) structure: hot inside, cool outside.<br/><br/><strong>When this occurs</strong>: <em>blazars</em> — AGN whose relativistic jets point at Earth (which only happens when we're nearly along the BH spin axis). The brightness boost from those polar jets is what makes blazars among the most luminous objects in the universe.">Face-on</button>
+
+    <button data-preset="cold"
+      data-info="<strong>Cold / quiescent disk</strong><br/><br/>Same BH, but with Ṁ dropped to ~0.2× nominal. Stefan-Boltzmann <code>L ∝ T⁴ ∝ Ṁ</code> → far less luminous and redder.<br/><br/><strong>When this occurs</strong>: BH X-ray binaries between outburst events; dormant SMBHs (most galaxies most of the time, including Milky Way's own Sgr A*, which is ~10⁻⁹ × Eddington).<br/><br/><strong>What you see</strong>: dim, mostly red disk dominated by the outer/cooler regions. No bright inner ring.">Cold disk</button>
+
+    <button data-preset="quasar"
+      data-info="<strong>Quasar / luminous AGN</strong> (3C 273-class)<br/><br/>M ≈ 10⁹ M_sun, near-extremal spin a/M ≈ 0.998, Ṁ near Eddington (~2.5× nominal here).<br/><br/><strong>Origin</strong>: SMBHs accreting at peak luminosity, typically in galaxy mergers that funnel huge gas reservoirs to the center.<br/><br/><strong>What you see</strong>: tiny prograde ISCO ≈ 1.24M (just outside the Kerr horizon r_+ ≈ 1.06M); enormous, very hot inner disk; intense Doppler beaming. Real quasars outshine entire galaxies.<br/><br/><strong>Real examples</strong>: 3C 273, the original quasar (still detectable with binoculars at 2.4 Glyr).">Quasar</button>
+
+    <button data-preset="relflyby"
+      data-info="<strong>Relativistic flyby</strong> (β = 0.85, auto-orbit off)<br/><br/>Camera moving at 0.85c tangentially around the BH.<br/><br/><strong>What you see</strong>: the entire starfield streams forward toward your direction of motion (relativistic <em>aberration</em> / 'headlight effect'). At β=0.85, the back hemisphere shrinks to a small dim disc behind you and the forward hemisphere stretches and brightens by D⁴ ≈ 9×.<br/><br/><strong>When this occurs in nature</strong>: never directly observed by humans. But it is the frame of (a) ultra-high-energy cosmic rays approaching us, (b) jet plasma in blazars (which is why their jets look 'one-sided' — Doppler boosted toward us), (c) future relativistic spacecraft.">Rel flyby</button>
+
+  </div>
+
+</div>
+
+<div id="stats">- fps</div>
+<div id="tip"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

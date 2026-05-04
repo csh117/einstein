@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Einstein - Terrell Rotation</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #050810;
+               overflow: hidden;
+               font-family: ui-sans-serif, system-ui, sans-serif; color: #ddd; }
+  #gl { display: block; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; padding: 10px 12px;
+    background: rgba(0,0,0,0.55); border-radius: 8px; font-size: 12px;
+    backdrop-filter: blur(4px); user-select: none;
+    border: 1px solid rgba(255,255,255,0.08);
+    width: 240px;
+  }
+  #ui label { display: block; margin: 6px 0 1px; opacity: 0.85; font-size: 11px;
+              cursor: help; padding: 1px 0; border-radius: 3px; }
+  #ui label:hover { background: rgba(255,255,255,0.03); }
+  #ui input[type=range] { width: 100%; }
+  #ui input[type=checkbox] { margin-right: 4px; vertical-align: middle; }
+  #ui .row { display: flex; justify-content: space-between; gap: 8px;
+             font-variant-numeric: tabular-nums; opacity: 0.85; font-size: 11px;
+             padding: 1px 0; cursor: help; border-radius: 3px; }
+  #ui .row:hover { background: rgba(255,255,255,0.03); }
+  #ui .val { opacity: 0.65; font-variant-numeric: tabular-nums; }
+  #ui hr { border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 8px 0; }
+  #ui .presets { margin-top: 8px; display: grid;
+                 grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  #ui .presets button {
+    background: #1c2530; color: #cdd6e0; border: 1px solid #2c3a4d;
+    padding: 5px 6px; font-size: 11px; border-radius: 4px; cursor: help;
+    font-family: inherit;
+  }
+  #ui .presets button:hover { background: #2a3a50; }
+  #ui select { width: 100%; background: #0a0e16; color: #cdd6e0;
+               border: 1px solid #2c3a4d; border-radius: 3px;
+               padding: 4px 6px; font-family: inherit; font-size: 11px; }
+
+  #title  { position: fixed; top: 12px; right: 12px; opacity: 0.85; font-size: 12px;
+            text-align: right; line-height: 1.4; max-width: 380px; }
+  #title strong { color: #aac6ff; }
+  #panelA { position: fixed; top: 64px; left: 12px; opacity: 0.9;
+            font-size: 13px; pointer-events: none; }
+  #panelB { position: fixed; top: 64px; right: 12px; opacity: 0.9;
+            font-size: 13px; text-align: right; pointer-events: none; }
+  #panelA strong, #panelB strong { color: #aac6ff; }
+  #divider { position: fixed; top: 0; left: 50%; width: 1px; height: 100%;
+             background: rgba(120, 150, 200, 0.20); pointer-events: none; }
+  #takeaway {
+    position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%);
+    background: rgba(8, 12, 20, 0.85); padding: 10px 18px; border-radius: 8px;
+    border: 1px solid rgba(180, 200, 230, 0.12); font-size: 14px; color: #e6ecf2;
+    backdrop-filter: blur(4px); pointer-events: none; max-width: 80vw;
+    text-align: center;
+  }
+  #stats { position: fixed; bottom: 8px; right: 12px; opacity: 0.5; font-size: 11px; }
+  #tip {
+    position: fixed; pointer-events: none; display: none; z-index: 1000;
+    max-width: 360px; padding: 10px 12px;
+    background: rgba(8, 12, 20, 0.97); color: #e6ecf2;
+    border: 1px solid rgba(150, 180, 220, 0.25);
+    border-radius: 6px; font-size: 12px; line-height: 1.45;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.7);
+  }
+  #tip strong { color: #aac6ff; }
+  #tip code { font-family: ui-monospace, monospace; font-size: 11px;
+              background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="title">
+  <strong>Terrell Rotation</strong> — what fast objects actually look like<br/>
+  <span style="opacity:0.7">Two halves: same object, same speed, different rendering rule.</span>
+</div>
+
+<div id="panelA"><strong>"Naive" view</strong><br/>
+  <span style="opacity:0.7">Lorentz contraction only,<br/>ignoring light travel time</span></div>
+<div id="panelB"><strong>"Real" view</strong><br/>
+  <span style="opacity:0.7">Full Penrose–Terrell,<br/>accounting for light travel time</span></div>
+<div id="divider"></div>
+
+<div id="ui">
+
+  <label data-info="<strong>Object speed β = v/c</strong><br/>How fast the object is moving through your field of view, perpendicular to your line of sight. Lorentz contraction scales as 1/γ along the direction of motion; the Terrell rotation effect kicks in for any β &gt; 0.">
+    Object speed β <span class="val" id="vBeta">0.50</span></label>
+  <input id="rBeta" type="range" min="0" max="0.99" step="0.01" value="0.5" />
+
+  <label data-info="<strong>Object</strong>: choose a cube (faces lettered F/B/L/R/U/D so you can spot the rotation) or a sphere (Penrose-Terrell theorem — a sphere always looks spherical at any speed; only its apparent radius changes). Switch between them to see the famous result that rotations are visible on cubes but not spheres.">
+    Object</label>
+  <select id="sObj">
+    <option value="cube">Cube (rotation visible)</option>
+    <option value="sphere">Sphere (Penrose-Terrell: stays a sphere)</option>
+  </select>
+
+  <hr/>
+
+  <div class="row" data-info="<strong>Lorentz factor γ = 1/√(1-β²)</strong>">
+    <span>γ</span><span id="vGamma">1.155</span>
+  </div>
+  <div class="row" data-info="<strong>Apparent rotation</strong>: classical Terrell formula for the apparent rotation of a small distant object: <code>cos θ_app = (cos θ_true + β) / (1 + β cos θ_true)</code>. For an object at θ=90° (closest approach), the apparent rotation angle is <code>arcsin(β)</code>.">
+    <span>rotation at closest approach</span><span id="vRot">30°</span>
+  </div>
+
+  <hr/>
+
+  <label data-info="<strong>Time speed</strong>: scales the simulation clock. 1 = real time, 0 = freeze (study a single moment), &gt;1 = speed up the flyby.">
+    Time speed <span class="val" id="vTs">1.00</span></label>
+  <input id="rTs" type="range" min="0" max="3" step="0.05" value="1.0" />
+
+  <label data-info="<strong>Distance to observer</strong>: how far the object is from you (in object diameters). Closer = more dramatic Terrell distortion (object subtends large angle), further = more uniform flyby.">
+    Distance <span class="val" id="vDist">8.0</span></label>
+  <input id="rDist" type="range" min="3" max="20" step="0.5" value="8.0" />
+
+  <label data-info="<strong>Camera FOV</strong>: how wide a field the camera takes in. Pure optics, not physics.">
+    FOV <span class="val" id="vFov">60</span></label>
+  <input id="rFov" type="range" min="20" max="100" step="1" value="60" />
+
+  <label data-info="<strong>Show motion ghost</strong>: a faded copy of the object's position at the apparent (retarded) time. Helpful for seeing how light delay shifts the perceived position from the 'true' position.">
+    <input id="cGhost" type="checkbox" /> Motion ghost</label>
+
+  <label data-info="<strong>Pause</strong>: freeze the animation to study one frame.">
+    <input id="cPause" type="checkbox" /> Pause</label>
+
+  <hr/>
+
+  <div class="presets">
+    <button data-preset="0"
+      data-info="<strong>β = 0</strong>: no motion. Both halves identical.">β=0</button>
+    <button data-preset="0.3"
+      data-info="<strong>β = 0.3</strong>: subtle. Cube on the right tips ~17°, the left half just shrinks a tiny bit horizontally.">β=0.3</button>
+    <button data-preset="0.6"
+      data-info="<strong>β = 0.6</strong>: clearly visible — naive view shows ~20% horizontal contraction; correct view rotates by ~37°.">β=0.6</button>
+    <button data-preset="0.866"
+      data-info="<strong>β = √3/2 ≈ 0.866</strong>: γ = 2 exactly. Naive view shows half-width cube; correct view shows a 60°-rotated cube. Compare side-by-side carefully — the rear face of the cube becomes visible.">β=0.866</button>
+    <button data-preset="0.95"
+      data-info="<strong>β = 0.95</strong>: γ ≈ 3.2. Severe distortion both ways. The cube on the right looks almost edge-on as it passes.">β=0.95</button>
+    <button data-preset="0.99"
+      data-info="<strong>β = 0.99</strong>: γ ≈ 7.1. Naive view: an extreme pancake. Correct view: cube nearly turned 90° — you see almost entirely the trailing face.">β=0.99</button>
+  </div>
+
+</div>
+
+<div id="takeaway"></div>
+<div id="stats">- fps</div>
+<div id="tip"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

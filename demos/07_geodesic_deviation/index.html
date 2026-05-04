@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Einstein - Geodesic Deviation</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #050810;
+               overflow: hidden;
+               font-family: ui-sans-serif, system-ui, sans-serif; color: #ddd; }
+  #gl { display: block; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; padding: 10px 12px;
+    background: rgba(0,0,0,0.55); border-radius: 8px; font-size: 12px;
+    backdrop-filter: blur(4px); user-select: none;
+    border: 1px solid rgba(255,255,255,0.08);
+    width: 240px;
+  }
+  #ui label { display: block; margin: 6px 0 1px; opacity: 0.85; font-size: 11px;
+              cursor: help; padding: 1px 0; border-radius: 3px; }
+  #ui label:hover { background: rgba(255,255,255,0.03); }
+  #ui input[type=range] { width: 100%; }
+  #ui input[type=checkbox] { margin-right: 4px; vertical-align: middle; }
+  #ui .row { display: flex; justify-content: space-between; gap: 8px;
+             font-variant-numeric: tabular-nums; opacity: 0.85; font-size: 11px;
+             padding: 1px 0; cursor: help; border-radius: 3px; }
+  #ui .row:hover { background: rgba(255,255,255,0.03); }
+  #ui .val { opacity: 0.65; font-variant-numeric: tabular-nums; }
+  #ui hr { border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 8px 0; }
+  #ui .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+  #ui .controls button {
+    background: #1c2530; color: #cdd6e0; border: 1px solid #2c3a4d;
+    padding: 5px 6px; font-size: 11px; border-radius: 4px; cursor: help;
+    font-family: inherit;
+  }
+  #ui .controls button:hover { background: #2a3a50; }
+
+  #title  { position: fixed; top: 12px; right: 12px; opacity: 0.85; font-size: 12px;
+            text-align: right; line-height: 1.4; max-width: 380px; }
+  #title strong { color: #aac6ff; }
+  #panelL { position: fixed; top: 64px; left: 16px; opacity: 0.95;
+            font-size: 13px; pointer-events: none; max-width: 240px; }
+  #panelR { position: fixed; top: 64px; right: 16px; opacity: 0.95;
+            font-size: 13px; text-align: right; pointer-events: none; max-width: 260px; }
+  #panelL strong, #panelR strong { color: #aac6ff; }
+  #panelL .small, #panelR .small { opacity: 0.65; font-size: 11px; line-height: 1.4; }
+  #divider { position: fixed; top: 0; left: 50%; width: 1px; height: 100%;
+             background: rgba(120, 150, 200, 0.20); pointer-events: none; }
+  #takeaway {
+    position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%);
+    background: rgba(8, 12, 20, 0.90); padding: 10px 18px; border-radius: 8px;
+    border: 1px solid rgba(180, 200, 230, 0.12); font-size: 14px; color: #e6ecf2;
+    backdrop-filter: blur(4px); pointer-events: none; max-width: 80vw;
+    text-align: center;
+  }
+  #stats { position: fixed; bottom: 8px; right: 12px; opacity: 0.5; font-size: 11px; }
+  #tip {
+    position: fixed; pointer-events: none; display: none; z-index: 1000;
+    max-width: 360px; padding: 10px 12px;
+    background: rgba(8, 12, 20, 0.97); color: #e6ecf2;
+    border: 1px solid rgba(150, 180, 220, 0.25);
+    border-radius: 6px; font-size: 12px; line-height: 1.45;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.7);
+  }
+  #tip strong { color: #aac6ff; }
+  #tip code { font-family: ui-monospace, monospace; font-size: 11px;
+              background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="title">
+  <strong>Geodesic Deviation</strong> — why "free-falling things curve together" tells you spacetime is curved<br/>
+  <span style="opacity:0.7">Two marbles. Two views. Same physics — different intuitions.</span>
+</div>
+
+<div id="panelL"><strong>If gravity were just "down"</strong>
+  <div class="small">A uniform pull. Two marbles released side-by-side fall along parallel lines and stay the same distance apart forever.</div></div>
+<div id="panelR"><strong>Real gravity points to the center</strong>
+  <div class="small">Two parallel free-fallers actually curve toward each other. No force pulled them together — their paths just both lead to the same place.</div></div>
+<div id="divider"></div>
+
+<div id="ui">
+
+  <label data-info="<strong>Initial horizontal separation</strong> between the two marbles, in units of Earth radii. Larger separation makes the convergence more visible per unit time.">
+    Separation <span class="val" id="vSep">0.50</span></label>
+  <input id="rSep" type="range" min="0.05" max="1.5" step="0.05" value="0.5" />
+
+  <label data-info="<strong>Drop height above center</strong>, in Earth radii. Heights above 1 are above the surface; values below 1 are 'inside' (interior solution = linear gravity for uniform density)."
+    >Drop height <span class="val" id="vH">2.00</span></label>
+  <input id="rH" type="range" min="1.05" max="6.0" step="0.05" value="2.0" />
+
+  <hr/>
+
+  <div class="row" data-info="<strong>Live separation</strong> between the marbles in the right pane. Decreases as they fall — that's geodesic deviation: their world-lines (geodesics) curve toward each other in curved spacetime.">
+    <span>current separation</span><span id="vDist">0.50</span>
+  </div>
+  <div class="row" data-info="<strong>Tidal acceleration</strong> = relative acceleration between the marbles divided by their separation. Equals <code>−GM/r³</code> for radial gravity. The Riemann curvature tensor in disguise — it's literally how we measure spacetime curvature.">
+    <span>tidal a / separation</span><span id="vTidal">0.000</span>
+  </div>
+
+  <hr/>
+
+  <div class="controls">
+    <button id="bPlay"
+      data-info="Play / pause time advancement.">▶ Play</button>
+    <button id="bRestart"
+      data-info="Reset both marbles to their starting positions.">⟲ Restart</button>
+  </div>
+
+  <label data-info="<strong>Time speed</strong>: scales the simulation rate.">
+    Time speed <span class="val" id="vTs">1.00</span></label>
+  <input id="rTs" type="range" min="0.05" max="3" step="0.05" value="1.0" />
+
+  <label data-info="<strong>Show trails</strong>: fading lines marking each marble's recent path. Most useful for seeing the convergence pattern."
+    ><input id="cTrail" type="checkbox" checked /> Trails</label>
+
+  <label data-info="<strong>Show acceleration arrows</strong>: small vectors showing the direction and strength of gravity at each marble. In the left pane, both arrows always point straight down; in the right pane, both point at the Earth's center."
+    ><input id="cArrows" type="checkbox" /> Acceleration arrows</label>
+
+  <label data-info="<strong>Show 'flat-space straight lines'</strong>: in the right pane, overlay the dotted paths the marbles WOULD follow if they were in flat space (i.e., zero gravity, just inertia from initial conditions). The visible deviation between dotted and solid trails IS spacetime curvature."
+    ><input id="cFlatRef" type="checkbox" /> Flat-space reference</label>
+
+</div>
+
+<div id="takeaway"></div>
+<div id="stats">- fps</div>
+<div id="tip"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Einstein - Light Clock (Time Dilation)</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #050810;
+               overflow: hidden;
+               font-family: ui-sans-serif, system-ui, sans-serif; color: #ddd; }
+  #gl { display: block; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; padding: 10px 12px;
+    background: rgba(0,0,0,0.55); border-radius: 8px; font-size: 12px;
+    backdrop-filter: blur(4px); user-select: none;
+    border: 1px solid rgba(255,255,255,0.08);
+    width: 240px;
+  }
+  #ui label { display: block; margin: 6px 0 1px; opacity: 0.85; font-size: 11px;
+              cursor: help; padding: 1px 0; border-radius: 3px; }
+  #ui label:hover { background: rgba(255,255,255,0.03); }
+  #ui input[type=range] { width: 100%; }
+  #ui .row { display: flex; justify-content: space-between; gap: 8px;
+             font-variant-numeric: tabular-nums; opacity: 0.85; font-size: 11px;
+             padding: 1px 0; cursor: help; border-radius: 3px; }
+  #ui .row:hover { background: rgba(255,255,255,0.03); }
+  #ui .val { opacity: 0.65; font-variant-numeric: tabular-nums; }
+  #ui .key { opacity: 0.85; }
+  #ui hr { border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 8px 0; }
+  #ui .presets { margin-top: 8px; display: grid;
+                 grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  #ui .presets button {
+    background: #1c2530; color: #cdd6e0; border: 1px solid #2c3a4d;
+    padding: 5px 6px; font-size: 11px; border-radius: 4px; cursor: help;
+    font-family: inherit;
+  }
+  #ui .presets button:hover { background: #2a3a50; }
+  #title  { position: fixed; top: 12px; right: 12px; opacity: 0.85; font-size: 12px;
+            text-align: right; line-height: 1.4; max-width: 360px; }
+  #title strong { color: #aac6ff; }
+  #takeaway {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    background: rgba(8, 12, 20, 0.92); padding: 12px 24px; border-radius: 10px;
+    border: 1px solid rgba(180, 200, 230, 0.20); font-size: 15px; color: #e6ecf2;
+    backdrop-filter: blur(6px); pointer-events: none;
+    text-align: center; line-height: 1.4; max-width: 80vw;
+    box-shadow: 0 0 22px rgba(120, 100, 200, 0.15);
+  }
+  #takeaway b      { color: #fff; }
+  #takeaway .cyan  { color: #5fffe0; font-weight: 800; text-shadow: 0 0 8px rgba(95,255,224,0.5); }
+  #takeaway .pink  { color: #ff6ad5; font-weight: 800; text-shadow: 0 0 8px rgba(255,106,213,0.5); }
+  #stats { position: fixed; bottom: 8px; right: 12px; opacity: 0.5; font-size: 11px; }
+  #tip {
+    position: fixed; pointer-events: none; display: none; z-index: 1000;
+    max-width: 340px; padding: 10px 12px;
+    background: rgba(8, 12, 20, 0.97); color: #e6ecf2;
+    border: 1px solid rgba(150, 180, 220, 0.25);
+    border-radius: 6px; font-size: 12px; line-height: 1.45;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.7);
+  }
+  #tip strong { color: #aac6ff; }
+  #tip code { font-family: ui-monospace, monospace; font-size: 11px;
+              background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="title">
+  <strong>Time Dilation - the Light Clock</strong><br/>
+  <span style="opacity:0.7">Same clock. Same light. Different observers see it tick at different rates.</span>
+</div>
+
+<div id="ui">
+
+  <label data-info="<strong>Speed of moving clock β = v/c</strong><br/>The right-hand clock is moving with this speed relative to your screen (the 'lab' frame). The left-hand clock sits at rest, so it ticks at its natural rate. As β grows, the right-hand clock visibly slows down."
+    >Moving clock β <span class="val" id="vBeta">0.50</span></label>
+  <input id="rBeta" type="range" min="0" max="0.99" step="0.01" value="0.5" />
+
+  <hr/>
+
+  <div class="row" data-info="<strong>Lorentz factor γ = 1/√(1-β²)</strong><br/>The amount by which the moving clock's tick rate is slowed. γ=1 at β=0, γ→∞ as β→1.">
+    <span class="key">γ</span><span id="vGamma">1.155</span>
+  </div>
+  <div class="row" data-info="<strong>Tick rate ratio</strong>: the ratio of moving-clock ticks to stationary-clock ticks. Equal to 1/γ.">
+    <span class="key">tick ratio</span><span id="vRatio">0.866</span>
+  </div>
+  <div class="row" data-info="<strong>Stationary clock — total ticks elapsed</strong> in your frame since the simulation started.">
+    <span class="key">stationary ticks</span><span id="vTicksA">0</span>
+  </div>
+  <div class="row" data-info="<strong>Moving clock — total ticks elapsed</strong> in your frame. Always ≤ stationary ticks for β > 0; the gap grows over time.">
+    <span class="key">moving ticks</span><span id="vTicksB">0</span>
+  </div>
+  <div class="row" data-info="<strong>Per-cycle drift</strong> = stationary ticks − moving ticks. The gap that accumulates because the moving clock's photon takes a longer (diagonal) path between mirrors."><span class="key">drift</span><span id="vDrift">0</span></div>
+
+  <hr/>
+
+  <label data-info="<strong>Time speed</strong>: scales the simulation clock. 0 = freeze; 1 = real time."
+    >Time speed <span class="val" id="vTs">1.00</span></label>
+  <input id="rTs" type="range" min="0" max="3" step="0.05" value="1.0" />
+
+  <label data-info="<strong>Show photon trail</strong>: a fading line behind each photon, so you can see the diagonal vs vertical paths."
+    ><input id="cTrail" type="checkbox" checked /> Photon trail</label>
+
+  <label data-info="<strong>Show grid</strong>: faint reference grid at z=0 so you can judge horizontal motion."
+    ><input id="cGrid" type="checkbox" checked /> Reference grid</label>
+
+  <hr/>
+
+  <div class="presets">
+    <button data-preset="0"
+      data-info="<strong>β = 0</strong>: the moving clock isn't moving. Both clocks tick identically. γ = 1. Reference baseline."
+      >β=0</button>
+    <button data-preset="0.3"
+      data-info="<strong>β = 0.3</strong>: moving at 30% the speed of light. Modest dilation: γ ≈ 1.05, moving clock ticks ~5% slower. Around the speed of relativistic electrons in old CRT TVs."
+      >β=0.3</button>
+    <button data-preset="0.6"
+      data-info="<strong>β = 0.6</strong>: γ = 1.25. Moving clock ticks 20% slower. The speed of electrons in a small particle accelerator."
+      >β=0.6</button>
+    <button data-preset="0.866"
+      data-info="<strong>β = √3/2 ≈ 0.866</strong>: γ = 2 exactly. Moving clock ticks at half rate. Speed of muons in cosmic-ray showers — at this β their ~2 μs lifetime gets stretched to ~4 μs in our frame, letting them reach the ground from the upper atmosphere instead of decaying first."
+      >β=0.866</button>
+    <button data-preset="0.95"
+      data-info="<strong>β = 0.95</strong>: γ ≈ 3.2. Moving clock ticks at ~1/3 rate. Around the speed of LHC protons after the first injection stage."
+      >β=0.95</button>
+    <button data-preset="0.99"
+      data-info="<strong>β = 0.99</strong>: γ ≈ 7.1. Moving clock ticks at ~14% rate. Approaches the regime where time dilation makes interstellar travel imaginable for the traveler (but not for those left behind)."
+      >β=0.99</button>
+  </div>
+
+</div>
+
+<div id="takeaway"></div>
+<div id="stats">- fps</div>
+<div id="tip"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

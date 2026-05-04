@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Einstein - Relativity of Simultaneity</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #050810;
+               overflow: hidden;
+               font-family: ui-sans-serif, system-ui, sans-serif; color: #ddd; }
+  #gl { display: block; width: 100vw; height: 100vh; }
+
+  /* Big colored banner above each panel — makes the L/R contrast obvious */
+  .panel-banner {
+    position: fixed; top: 12px; padding: 10px 16px;
+    border-radius: 10px; backdrop-filter: blur(6px);
+    font-size: 14px; line-height: 1.35; pointer-events: none;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.10);
+    max-width: 360px;
+  }
+  .panel-banner .badge { display: inline-block; padding: 1px 8px;
+    border-radius: 999px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.5px; text-transform: uppercase; margin-right: 6px; }
+  .panel-banner .who   { font-weight: 700; font-size: 15px; }
+  .panel-banner .what  { opacity: 0.85; font-size: 12px; margin-top: 2px; }
+
+  #panelG {
+    left: 12px; background: rgba(40, 70, 110, 0.55);
+    border-color: rgba(140, 200, 255, 0.35);
+  }
+  #panelG .badge { background: #ffd07a; color: #1a1a1a; }
+  #panelG .who   { color: #ffd07a; }
+
+  #panelT {
+    right: 12px; background: rgba(150, 70, 130, 0.45);
+    border-color: rgba(255, 160, 220, 0.35); text-align: right;
+  }
+  #panelT .badge { background: #ff6680; color: #1a0a18; }
+  #panelT .who   { color: #ffacc6; }
+
+  /* "What each observer says" line in each panel */
+  .verdict {
+    position: fixed; top: 140px; padding: 8px 14px;
+    font-size: 13px; font-weight: 600;
+    border-radius: 8px; backdrop-filter: blur(6px);
+    pointer-events: none; max-width: 360px;
+    background: rgba(8, 12, 20, 0.65);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  #verdictG { left: 12px; color: #ffe9a0; }
+  #verdictT { right: 12px; color: #ffacc6; text-align: right; }
+
+  #ui {
+    position: fixed; top: 196px; left: 12px; padding: 10px 12px;
+    background: rgba(0,0,0,0.55); border-radius: 8px; font-size: 12px;
+    backdrop-filter: blur(4px); user-select: none;
+    border: 1px solid rgba(255,255,255,0.08);
+    width: 240px;
+  }
+  #ui label { display: block; margin: 6px 0 1px; opacity: 0.85; font-size: 11px;
+              cursor: help; padding: 1px 0; border-radius: 3px; }
+  #ui label:hover { background: rgba(255,255,255,0.03); }
+  #ui input[type=range] { width: 100%; }
+  #ui input[type=checkbox] { margin-right: 4px; vertical-align: middle; }
+  #ui .row { display: flex; justify-content: space-between; gap: 8px;
+             font-variant-numeric: tabular-nums; opacity: 0.85; font-size: 11px;
+             padding: 1px 0; cursor: help; border-radius: 3px; }
+  #ui .row:hover { background: rgba(255,255,255,0.03); }
+  #ui .val { opacity: 0.65; font-variant-numeric: tabular-nums; }
+  #ui hr { border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 8px 0; }
+  #ui .presets { margin-top: 8px; display: grid;
+                 grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  #ui .presets button, #ui .controls button {
+    background: #1c2530; color: #cdd6e0; border: 1px solid #2c3a4d;
+    padding: 5px 6px; font-size: 11px; border-radius: 4px; cursor: help;
+    font-family: inherit;
+  }
+  #ui .presets button:hover, #ui .controls button:hover { background: #2a3a50; }
+  #ui .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+
+  #title  { position: fixed; bottom: 60px; left: 50%;
+            transform: translateX(-50%); opacity: 0.85; font-size: 12px;
+            text-align: center; line-height: 1.4; max-width: 540px;
+            background: rgba(8,12,20,0.45); padding: 6px 14px;
+            border-radius: 6px; pointer-events: none; }
+  #title strong { color: #aac6ff; }
+
+  #divider { position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+             width: 4px; height: 100%;
+             background: linear-gradient(180deg,
+                rgba(255, 220, 120, 0.55) 0%,
+                rgba(255, 200, 90,  0.35) 50%,
+                rgba(255, 160, 60,  0.25) 100%);
+             box-shadow: 0 0 18px rgba(255, 200, 90, 0.45),
+                         0 0 4px  rgba(255, 220, 130, 0.6);
+             pointer-events: none; z-index: 20; }
+  #divider::after {
+    content: "VS"; position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 38px; height: 38px; line-height: 38px;
+    text-align: center; font-size: 14px; font-weight: 800;
+    color: #1a1208; letter-spacing: 1px;
+    background: linear-gradient(135deg, #ffe385 0%, #ffb84a 100%);
+    border-radius: 50%;
+    box-shadow: 0 0 12px rgba(255, 200, 90, 0.7),
+                inset 0 0 6px rgba(255, 240, 180, 0.5);
+    border: 2px solid rgba(255, 240, 180, 0.6);
+  }
+
+  #takeaway {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    background: rgba(8, 12, 20, 0.92); padding: 12px 22px; border-radius: 10px;
+    border: 1px solid rgba(180, 200, 230, 0.18); font-size: 14px; color: #e6ecf2;
+    backdrop-filter: blur(4px); pointer-events: none; max-width: 80vw;
+    text-align: center; line-height: 1.4;
+  }
+  #stats { position: fixed; bottom: 8px; right: 12px; opacity: 0.5; font-size: 11px; }
+  #tip {
+    position: fixed; pointer-events: none; display: none; z-index: 1000;
+    max-width: 360px; padding: 10px 12px;
+    background: rgba(8, 12, 20, 0.97); color: #e6ecf2;
+    border: 1px solid rgba(150, 180, 220, 0.25);
+    border-radius: 6px; font-size: 12px; line-height: 1.45;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.7);
+  }
+  #tip strong { color: #aac6ff; }
+  #tip code { font-family: ui-monospace, monospace; font-size: 11px;
+              background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="title">
+  <strong>Relativity of Simultaneity</strong> — Einstein's train, with Dad on the platform and Jack on the train.<br/>
+  <span style="opacity:0.7">Two lightning bolts. Two observers. Two stories — both correct.</span>
+</div>
+
+<!-- Two big banners that make the L/R contrast immediate -->
+<div id="panelG" class="panel-banner">
+  <span class="badge">LEFT — Lab frame</span><br/>
+  <span class="who">🧍 Dad on the platform</span>
+  <div class="what">Train zooms past at speed β.<br/>
+  Both bolts strike at the SAME instant from his point of view.</div>
+</div>
+
+<div id="panelT" class="panel-banner">
+  <span class="badge">RIGHT — Train frame</span><br/>
+  <span class="who">🧒 Jack on the train</span>
+  <div class="what">Train sits still — the WORLD slides past him.<br/>
+  Front bolt strikes FIRST. Back bolt strikes later.</div>
+</div>
+
+<!-- Live verdict (what the observer says about each strike) -->
+<div id="verdictG" class="verdict">⏳ waiting for the bolts…</div>
+<div id="verdictT" class="verdict">⏳ waiting for the bolts…</div>
+
+<div id="divider"></div>
+
+<div id="ui">
+
+  <label data-info="<strong>Train speed β = v/c</strong><br/>How fast Jack's train is moving relative to Dad's platform. β = 0 → both panels identical. The disagreement scales as <code>Δt' = γβL</code>.">
+    Train speed β <span class="val" id="vBeta">0.50</span></label>
+  <input id="rBeta" type="range" min="0" max="0.95" step="0.01" value="0.5" />
+
+  <label data-info="<strong>Train rest length L</strong><br/>The train's length when measured in its own frame. Bigger L means Jack sees a bigger time-gap between the front and back strikes.">
+    Train length L <span class="val" id="vL">6.0</span></label>
+  <input id="rL" type="range" min="2.0" max="10.0" step="0.5" value="6.0" />
+
+  <hr/>
+
+  <div class="row" data-info="<strong>Lorentz factor γ</strong> = 1/√(1−β²)"><span>γ</span><span id="vGamma">1.155</span></div>
+  <div class="row" data-info="<strong>Time gap in Jack's frame:</strong> Δt' = γβL — the amount by which the front strike precedes the back strike from Jack's point of view."><span>Δt' (Jack's frame)</span><span id="vDtT">3.46</span></div>
+  <div class="row" data-info="<strong>Lab clock</strong>: the master time variable driving the simulation."><span>lab time t</span><span id="vTLab">0.00</span></div>
+
+  <hr/>
+
+  <div class="controls">
+    <button id="bPlay"
+      data-info="Play / pause time advancement.">❚❚ Pause</button>
+    <button id="bRestart"
+      data-info="Reset to before the bolts strike.">⟲ Restart</button>
+  </div>
+
+  <label data-info="<strong>Time speed</strong>: scales the simulation clock.">
+    Time speed <span class="val" id="vTs">1.00</span></label>
+  <input id="rTs" type="range" min="0.05" max="3" step="0.05" value="1.0" />
+
+  <label data-info="<strong>Time scrubber</strong>: drag to set a specific moment.">
+    Time scrubber <span class="val" id="vT">−3.00</span></label>
+  <input id="rT" type="range" min="-5" max="10" step="0.05" value="-3" />
+
+  <hr/>
+
+  <div class="presets">
+    <button data-preset="0"
+      data-info="<strong>β = 0</strong>: train at rest. No disagreement.">β=0</button>
+    <button data-preset="0.3"
+      data-info="<strong>β = 0.3</strong>: a modest gap.">β=0.3</button>
+    <button data-preset="0.6"
+      data-info="<strong>β = 0.6</strong>: γ = 1.25.">β=0.6</button>
+    <button data-preset="0.866"
+      data-info="<strong>β = √3/2</strong>: γ = 2 exactly.">β=0.866</button>
+    <button data-preset="0.95"
+      data-info="<strong>β = 0.95</strong>: extreme.">β=0.95</button>
+  </div>
+
+</div>
+
+<div id="takeaway"></div>
+<div id="stats">- fps</div>
+<div id="tip"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
