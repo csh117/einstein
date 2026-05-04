@@ -111,6 +111,11 @@ const uniforms = {
     uJetAngle:    { value: 0.15 },       // half-opening angle (rad)
     uJetLen:      { value: 25.0 },       // tip extent (M)
     uJetBrt:      { value: 1.0 },        // brightness
+
+    // Diagnostic overlays
+    uShowPRing:   { value: 0.0 },        // 0/1 photon-ring critical curve
+    uBhScreen:    { value: new THREE.Vector2(0, 0) }, // BH center in NDC (JS-projected)
+    uBhDist:      { value: 18.0 },       // camera-BH distance (for b_crit projection)
 };
 
 // -------- shaders --------
@@ -156,6 +161,10 @@ uniform float uJetBeta;
 uniform float uJetAngle;
 uniform float uJetLen;
 uniform float uJetBrt;
+
+uniform float uShowPRing;
+uniform vec2  uBhScreen;
+uniform float uBhDist;
 
 const float FAR = 90.0;
 const int   MAX_DISK_HITS = 4;
@@ -549,6 +558,30 @@ void main() {
 
     vec3 col = accumCol + background * (1.0 - accumA);
 
+    // ----- Photon-ring overlay (analytic critical curve) -----
+    // Ring sits at b_crit = 3√3 M (Schwarzschild approx; Kerr breaks the
+    // symmetry slightly but this is a teaching aid not a fit). Projected to
+    // pixel space using camera-BH distance and FOV; the locus is a true
+    // circle in pixel space because perpendicular pixel distance scales by
+    // the same (H/2)/uTanFov factor for x and y.
+    if (uShowPRing > 0.5) {
+        vec2 pixHere = gl_FragCoord.xy;
+        vec2 pixCent = (uBhScreen * 0.5 + 0.5) * uResolution;
+        float pixD   = length(pixHere - pixCent);
+        float bcrit  = 3.0 * sqrt(3.0) * uMass;
+        float ringPix = (bcrit / max(uBhDist, 1.0)) *
+                        (uResolution.y * 0.5) / max(uTanFov, 1e-3);
+        // Two strokes: the n=∞ critical curve (bright) and a hint of the
+        // n=1 echo just inside (very faint). Explicit squaring instead of
+        // pow(neg, 2.0), which is undefined per GLSL spec.
+        float w1 = 1.6;
+        float d1 = (pixD - ringPix)         / w1;
+        float d2 = (pixD - ringPix * 0.985) / 1.0;
+        float ring1 = exp(-d1 * d1);
+        float ring2 = exp(-d2 * d2) * 0.35;
+        col += vec3(0.55, 0.85, 1.0) * (ring1 * 1.1 + ring2 * 0.6);
+    }
+
     fragColor = vec4(col, 1.0);
 }
 `;
@@ -664,6 +697,9 @@ bindRange("rJetB",  "vJetB",  uniforms.uJetBeta);
 bindRange("rJetA",  "vJetA",  uniforms.uJetAngle, (v) => v.toFixed(3));
 bindRange("rJetL",  "vJetL",  uniforms.uJetLen,   (v) => v.toFixed(0));
 bindRange("rJetBr", "vJetBr", uniforms.uJetBrt);
+
+// Diagnostic overlays
+bindCheck("cPRing", uniforms.uShowPRing);
 
 // Inclination
 const inclState = { value: 70 };
@@ -881,6 +917,14 @@ function tick(now) {
         const sign  = uniforms.uSpinDir.value;
         const omega = sign / (Math.pow(rh, 1.5) / Math.sqrt(Math.max(M, 1e-3)) + sign * a);
         uniforms.uHotPhi.value = omega * simT;
+    }
+
+    // ---- Project BH center to NDC for the photon-ring overlay ----
+    {
+        camera.updateMatrixWorld();
+        const bh = new THREE.Vector3(0, 0, 0).project(camera);
+        uniforms.uBhScreen.value.set(bh.x, bh.y);
+        uniforms.uBhDist.value = camera.position.length();
     }
 
     composer.render();

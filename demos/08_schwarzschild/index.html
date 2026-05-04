@@ -217,6 +217,14 @@
   </details>
 
   <details>
+    <summary data-info="<strong>Diagnostic overlays</strong>: analytic features drawn on top of the ray-traced image. Useful for narration / video to point at the physics.">Overlays</summary>
+
+    <div class="ctrl" data-info="<strong>Photon ring</strong>: thin pixel-space circle drawn at the analytic critical impact parameter <code>b_crit = 3√3 · M</code> (Schwarzschild). This is the boundary of the BH shadow and the locus where photons can orbit indefinitely. Kerr shifts/distorts this slightly; the overlay is a teaching aid.">
+      <label><input id="cPRing" type="checkbox" />Photon ring (b_crit)</label>
+    </div>
+  </details>
+
+  <details>
     <summary data-info="<strong>Background sky</strong>: switch between a procedural starfield (default) and a user-supplied HDR equirectangular panorama (e.g. ESO/GAIA Milky Way panorama). Both undergo aberration and Doppler when the camera is boosted.">Background sky</summary>
 
     <div class="ctrl" data-info="<strong>HDR panorama URL</strong>: paste an equirectangular sky panorama URL (JPG/PNG). Recommended: an ESO Milky Way panorama (e.g. <code>https://www.eso.org/public/archives/images/screen/eso0932a.jpg</code>) — the source must serve <code>Access-Control-Allow-Origin: *</code> for WebGL to load it.">
