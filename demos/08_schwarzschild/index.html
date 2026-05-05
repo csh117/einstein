@@ -194,11 +194,6 @@
       <input id="rIncl" type="range" min="0" max="90" step="1" value="70" />
     </div>
 
-    <div class="ctrl" data-info="<strong>Camera boost β = v/c</strong>: relativistic camera motion along the auto-orbit tangent. Activates two effects on the starfield:<br/><br/><strong>Aberration</strong>: stars shift toward the direction of motion (the 'headlight effect'). At β → 1, the entire sky compresses to a small bright disc ahead of you.<br/><br/><strong>Doppler boost</strong>: stars in front blueshift and brighten by <code>D⁴</code>; stars behind redshift and dim, where <code>D = 1/[γ(1 − β·n̂)]</code>.<br/><br/>Try the 'Rel flyby' preset for a relativistic camera pass.">
-      <label>Camera boost β <span class="val" id="vBoost">0.00</span></label>
-      <input id="rBoost" type="range" min="0.0" max="0.99" step="0.01" value="0.0" />
-    </div>
-
     <div class="ctrl" data-info="<strong>Auto-orbit</strong>: keeps the camera circling so the scene evolves on its own.">
       <label><input id="cAuto" type="checkbox" checked />Auto-orbit</label>
     </div>
@@ -213,6 +208,10 @@
     <button id="bReset" class="resetbtn"
       data-info="Snap the camera back to the default 70° / 18-unit position.">
       Reset camera
+    </button>
+    <button id="bPlunge" class="resetbtn"
+      data-info="<strong>Plunge into BH</strong>: animate the camera radially inward from your current position to just outside the horizon. Sky compresses ahead (relativistic aberration), disk swings overhead, then fade to black at r ≈ r_+. Press <em>Reset camera</em> to return.">
+      Plunge into BH
     </button>
   </details>
 

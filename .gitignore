@@ -27,8 +27,9 @@ assets/skyboxes/*.exr
 assets/skyboxes/*.hdr
 physics/_export/*.json
 
-# Local scaffolding (frill re-add backups)
+# Local scaffolding (frill re-add backups, pre-rewrite snapshots)
 *.bak
+.checkpoints/
 
 # Claude Code local settings (per-user)
 .claude/settings.local.json

@@ -80,7 +80,8 @@ const uniforms = {
     uResolution:  { value: new THREE.Vector2() },
     uCameraPos:   { value: new THREE.Vector3() },
     uCameraMat:   { value: new THREE.Matrix4() },
-    uCameraBeta:  { value: new THREE.Vector3() },
+    uCameraBeta:  { value: new THREE.Vector3() },  // legacy; always (0,0,0) in gold-standard mode
+    uCamRadialV:  { value: 0.0 },                  // signed; <0 = inward free-fall, =0 = static
     uTanFov:      { value: Math.tan((camera.fov * 0.5 * Math.PI) / 180) },
     uMass:        { value: 1.0 },
     uSpin:        { value: 0.0 },        // a/M
@@ -116,6 +117,18 @@ const uniforms = {
     uShowPRing:   { value: 0.0 },        // 0/1 photon-ring critical curve
     uBhScreen:    { value: new THREE.Vector2(0, 0) }, // BH center in NDC (JS-projected)
     uBhDist:      { value: 18.0 },       // camera-BH distance (for b_crit projection)
+
+    // Spaghettification cube: up to 64 free-fall test particles (xyz + r_p
+    // in .w for the gravitational-redshift factor). Inactive particles
+    // flagged with w < 0. JS updates each frame.
+    uParticles:   { value: Array.from({length: 64},
+                              () => new THREE.Vector4(0, 0, 0, -1)) },
+    // Signed radial velocity per particle (negative = inward), used for
+    // the kinematic Doppler factor on the emitted light.
+    uParticleVel: { value: new Float32Array(64) },
+    uNumParticles:{ value: 0 },                    // count of active particles
+    uPartBoxMin:  { value: new THREE.Vector3(0, 0, 0) },  // axis-aligned bbox in world coords
+    uPartBoxMax:  { value: new THREE.Vector3(0, 0, 0) },  // for shader early-out
 };
 
 // -------- shaders --------
@@ -132,7 +145,8 @@ in  vec2 vUv;
 uniform vec2  uResolution;
 uniform vec3  uCameraPos;
 uniform mat4  uCameraMat;
-uniform vec3  uCameraBeta;
+uniform vec3  uCameraBeta;     // legacy; gold-standard mode always sets (0,0,0)
+uniform float uCamRadialV;     // signed; <0 = inward free-fall, =0 = static
 uniform float uTanFov;
 uniform float uMass;
 uniform float uSpin;
@@ -165,6 +179,18 @@ uniform float uJetBrt;
 uniform float uShowPRing;
 uniform vec2  uBhScreen;
 uniform float uBhDist;
+
+// Spaghettification particles. .xyz = world Cartesian position, .w = r_p
+// (particle's BL radius for gravitational-redshift coloring). w<0 means
+// inactive (don't render). Bounding box uniforms enable a per-step
+// early-out so the inner loop only runs when the ray is near the cube.
+// uParticleVel[i] = signed radial proper-velocity (negative = inward)
+// for the kinematic Doppler factor in the particle's rest frame.
+uniform vec4  uParticles[64];
+uniform float uParticleVel[64];
+uniform int   uNumParticles;
+uniform vec3  uPartBoxMin;
+uniform vec3  uPartBoxMax;
 
 const float FAR = 90.0;
 const int   MAX_DISK_HITS = 4;
@@ -273,13 +299,16 @@ vec3 sampleSkyTexture(vec3 dir) {
     return pow(c, vec3(2.2));
 }
 
-vec3 sampleSky(vec3 dirRest, vec3 nObs) {
+vec3 sampleSky(vec3 dirRest, float omegaCam) {
     vec3 col = (uHasSky == 1) ? sampleSkyTexture(dirRest)
                               : sampleSkyProcedural(dirRest);
-    // Doppler boost on incoming light (direction = +nObs in camera frame
-    // is where camera looks; photon arrives travelling in -nObs).
-    float D = dopplerFactor(nObs, uCameraBeta);
-    return col * pow(D, 4.0);
+    // Gold-standard Doppler. Sky source is at r→∞ in the asymptotic-flat
+    // frame, so its 4-velocity has only a t-component (= 1) and the photon
+    // emission frequency equals the conserved energy E (= 1 in our gauge).
+    // The camera measures ω_cam, so D = ω_cam / ω_emit = ω_cam.
+    // Intensity boost = D^4. This single formula folds gravitational
+    // redshift and kinematic Doppler together.
+    return col * pow(omegaCam, 4.0);
 }
 
 // ============ disk physics ============
@@ -378,17 +407,103 @@ void main() {
     vec3  dirCam = normalize(vec3(frag.x * aspect * uTanFov, frag.y * uTanFov, -1.0));
     vec3  nView  = normalize((uCameraMat * vec4(dirCam, 0.0)).xyz);
 
-    // Aberrate: camera-frame view direction -> BH-frame direction.
-    vec3 dir = aberrate(nView, uCameraBeta);
+    // ============================================================
+    //   GOLD-STANDARD TETRAD-BASED RAY CONSTRUCTION (Schwarzschild)
+    // ============================================================
+    //
+    // Build the photon's 4-momentum in the BL coord basis from the camera's
+    // local Lorentz frame (its tetrad). This replaces the flat-space SR
+    // aberration with a curved-spacetime construction. Two observer types
+    // are supported: static (uCamRadialV=0) and radial free-fall
+    // (uCamRadialV<0, valid for Schwarzschild only). Tangential boost is
+    // not modelled here.
+    //
+    // Conventions:
+    //   - Camera position is uCameraPos in world Cartesian, BH at origin.
+    //   - BL spherical (r0, θ0, φ0) extracted from Cartesian.
+    //   - Spatial tetrad orthonormal {e_1, e_2, e_3} = {r̂, θ̂, φ̂}.
+    //   - Gauge: conserved E = −k_t = 1, so |k|→1 at infinity (matches the
+    //     existing Cartesian integrator's parameterisation).
+    //
+    // For a freely-falling observer with proper-velocity component vRad
+    // along +r̂ (so vRad < 0 means inward), the tetrad is built by Lorentz
+    // boosting the static tetrad:
+    //   e_0_FF^μ = γ(e_0_st^μ + vRad · e_1_st^μ)
+    //   e_1_FF^μ = γ(e_1_st^μ + vRad · e_0_st^μ)
+    //   e_2_FF^μ = e_2_st^μ,  e_3_FF^μ = e_3_st^μ
+    // Static-observer tetrad in Schwarzschild:
+    //   e_0_st = (1/√f, 0, 0, 0),  e_1_st = (0, √f, 0, 0)
+    //   e_2_st = (0, 0, 1/r, 0),   e_3_st = (0, 0, 0, 1/(r sinθ))
+    //
+    // Photon 4-momentum in tetrad (with ω_cam = 1 gauge):
+    //   k^α_tet = (1, n^1, n^2, n^3)
+    // Convert to coord basis k^μ = e_α^μ k^α_tet, then rescale by 1/E_local
+    // to enforce the integrator's E=1 gauge.
 
-    float a = uSpin * uMass;     // Kerr spin parameter (units of M)
+    // BL position from Cartesian
+    float r0  = length(uCameraPos);
+    float ct0 = uCameraPos.y / max(r0, 1e-3);
+    float st0 = sqrt(max(1.0 - ct0 * ct0, 0.0));
+    float r_xz = sqrt(max(uCameraPos.x * uCameraPos.x +
+                          uCameraPos.z * uCameraPos.z, 1e-6));
+    float cp0 = uCameraPos.x / r_xz;
+    float sp0 = uCameraPos.z / r_xz;
 
-    // Cartesian state: position x (BH-centered), momentum p with |p|=1 at
-    // infinity. No coordinate singularity at the spin axis.
+    // Spatial tetrad basis vectors in world Cartesian (orthonormal)
+    vec3 r_hat  = vec3(st0 * cp0, ct0,  st0 * sp0);
+    vec3 th_hat = vec3(ct0 * cp0, -st0, ct0 * sp0);
+    vec3 ph_hat = vec3(-sp0,        0.0, cp0);
+
+    // Project pixel direction onto the spatial tetrad
+    float n1 = dot(nView, r_hat);
+    float n2 = dot(nView, th_hat);
+    float n3 = dot(nView, ph_hat);
+
+    // Schwarzschild f at the camera (clamped slightly above the horizon
+    // to avoid the static-observer singularity).
+    float fCam     = 1.0 - 2.0 * uMass / max(r0, uMass * 2.05);
+    float fCamSqrt = sqrt(max(fCam, 1e-4));
+
+    // Camera radial velocity (signed; sign convention: +r̂ direction, so
+    // <0 means inward free-fall). Clamped strictly inside the light cone.
+    float vRad = clamp(uCamRadialV, -0.998, 0.998);
+    float gam  = 1.0 / sqrt(max(1.0 - vRad * vRad, 1e-6));
+
+    // Photon 4-momentum in coord basis, ω_cam = 1 gauge:
+    //   k^t = γ(1 + n1 vRad)/√f
+    //   k^r = γ √f (vRad + n1)
+    //   k^θ = n2/r
+    //   k^φ = n3/(r sinθ)
+    // Conserved E_local = −k_t = f · k^t = √f · γ · (1 + n1 vRad).
+    float E_local = fCamSqrt * gam * (1.0 + n1 * vRad);
+    float invE    = 1.0 / max(abs(E_local), 1e-6);
+
+    // Rescale to the integrator's E = 1 gauge.
+    float kT  = (gam * (1.0 + n1 * vRad) / fCamSqrt) * invE;   // = 1/fCam
+    float kR  = (gam * fCamSqrt * (vRad + n1))       * invE;
+    float kTh = (n2 / max(r0, 1e-3))                 * invE;
+    float kPh = (n3 / max(r0 * max(st0, 0.05), 1e-3)) * invE;
+
+    // Convert spatial parts (k^r, k^θ, k^φ) to Cartesian (k^x, k^y, k^z)
+    // using the standard spherical→Cartesian Jacobian.
+    float pX = st0 * cp0 * kR + r0 * ct0 * cp0 * kTh - r0 * st0 * sp0 * kPh;
+    float pY = ct0 * kR        - r0 * st0 * kTh;
+    float pZ = st0 * sp0 * kR + r0 * ct0 * sp0 * kTh + r0 * st0 * cp0 * kPh;
+    vec3 dir = vec3(pX, pY, pZ);
+
+    // Camera-frame frequency at the pixel (in E=1 gauge): ω_cam = 1/E_local.
+    // This carries through to every Doppler computation downstream.
+    float omegaCam = invE;
+
+    // Schwarzschild only in gold-standard mode (Kerr spin gated).
+    float a = 0.0;
+
+    // Cartesian state: position x (BH-centred), momentum p (= k^μ spatial
+    // parts in Cartesian). The integrator uses E=1 affine parameterisation.
     vec3 x = uCameraPos;
     vec3 p = dir;
 
-    float Rplus = uMass * (1.0 + sqrt(max(1.0 - uSpin * uSpin, 0.0)));
+    float Rplus = 2.0 * uMass;
 
     bool  captured = false;
     bool  escaped  = false;
@@ -442,10 +557,11 @@ void main() {
             float u_p    = Omega * u_t;
 
             // Photon's frequency in disk-fluid frame: ω_em = −p_μ u^μ
-            // = E u_t − L_z u^φ, with E = 1 (gauge). Sky frequency is E,
-            // so D = 1/(u_t − L_z u^φ), intensity ~ D⁴.
+            // = E·u_t − L_z·u^φ, with E = 1 (integrator gauge). Camera-frame
+            // frequency is omegaCam (computed from the tetrad ray init).
+            // D = ω_cam / ω_em folds gravitational + kinematic together.
             float omegaEm = u_t - Lz * u_p;
-            float D       = 1.0 / max(omegaEm, 1e-3);
+            float D       = omegaCam / max(omegaEm, 1e-3);
             float boost   = pow(D, 4.0);
 
             // Track whether anything actually emitted this crossing — only
@@ -538,6 +654,111 @@ void main() {
                 }
             }
         }
+
+        // ----- Spaghettification particles + wireframe edges (lensed) -----
+        // Bounding-box early-out keeps the inner loops cheap: rays that
+        // don't pass through the cube's bbox skip both loops entirely.
+        // Coloring: blackbody at T_obs = T_emit·√f_p, where f_p = 1 - 2M/r_p
+        // is the gravitational redshift factor at the particle. Camera-side
+        // factor (omegaCam) folds in the camera tetrad's blueshift/Doppler.
+        // Wireframe edges connect the 8 corners of the 4×4×4 grid via 12
+        // straight line segments. As the cube falls, the 4 radial-direction
+        // edges visibly stretch (spaghettification) while the 8 tangential
+        // edges shrink — exactly the GR tidal pattern.
+        if (uNumParticles > 0 &&
+            all(greaterThanEqual(x, uPartBoxMin)) &&
+            all(lessThanEqual(x, uPartBoxMax)))
+        {
+            float dlPhys = length(x - prev_x);
+
+            // Photon direction at this step (used for kinematic Doppler
+            // computation in the particle's rest frame).
+            vec3  photonDir = normalize(x - prev_x);
+
+            // ---- Particle dots ----
+            for (int i = 0; i < 64; i++) {
+                if (i >= uNumParticles) break;
+                vec4  pt   = uParticles[i];
+                if (pt.w < 0.0) continue;
+                vec3  d    = x - pt.xyz;
+                float d2   = dot(d, d);
+                if (d2 > 0.25) continue;
+                // σ² = 0.018 (σ ≈ 0.135 M): sharper individual dots.
+                float gauss = exp(-d2 / 0.018);
+                if (gauss < 0.002) continue;
+                float fP    = 1.0 - 2.0 * uMass / max(pt.w, uMass * 2.05);
+                float fPSqrt = sqrt(max(fP, 1e-3));
+                // Kinematic Doppler at the emitter:
+                //   ω_emit_p = γ_p (1 − β_p·n̂) · (1/√f_p)
+                // β_p = v_p · r̂_p (signed; negative = inward fall).
+                float v_p     = clamp(uParticleVel[i], -0.99, 0.99);
+                vec3  rHatP   = pt.xyz / max(length(pt.xyz), 1e-3);
+                float gammaP  = 1.0 / sqrt(max(1.0 - v_p*v_p, 1e-4));
+                float dopShift = gammaP * (1.0 - v_p * dot(rHatP, photonDir));
+                // Camera-side D = ω_cam / ω_emit_p folds it all together.
+                float D       = omegaCam * fPSqrt / max(dopShift, 1e-3);
+                float boost   = pow(D, 4.0);
+                // Observed temperature uses the same factor (T_obs ∝ D · T_emit).
+                float T_obs   = 14000.0 * D;
+                T_obs = clamp(T_obs, 600.0, 30000.0);
+                vec3  emitCol = blackbodyRGB(T_obs);
+                vec3  emission = emitCol * boost * gauss * dlPhys * 0.7;
+                float partA    = clamp(gauss * dlPhys * 0.5, 0.0, 0.9);
+                accumCol += emission * (1.0 - accumA);
+                accumA   += partA * (1.0 - accumA);
+            }
+
+            // ---- Wireframe edges (12 segments connecting cube corners) ----
+            // Indexing: idx = k*16 + j*4 + i, with k = radial, i,j tangential.
+            // Corner indices: 0,3,12,15,48,51,60,63.
+            for (int e = 0; e < 12; e++) {
+                int ia, ib;
+                if      (e == 0) { ia=0;  ib=3;  }      // i-edges (tangential, shrink)
+                else if (e == 1) { ia=12; ib=15; }
+                else if (e == 2) { ia=48; ib=51; }
+                else if (e == 3) { ia=60; ib=63; }
+                else if (e == 4) { ia=0;  ib=12; }      // j-edges (tangential, shrink)
+                else if (e == 5) { ia=3;  ib=15; }
+                else if (e == 6) { ia=48; ib=60; }
+                else if (e == 7) { ia=51; ib=63; }
+                else if (e == 8) { ia=0;  ib=48; }      // k-edges (radial, stretch)
+                else if (e == 9) { ia=3;  ib=51; }
+                else if (e ==10) { ia=12; ib=60; }
+                else             { ia=15; ib=63; }
+                vec4 a = uParticles[ia];
+                vec4 b = uParticles[ib];
+                if (a.w < 0.0 || b.w < 0.0) continue;
+                vec3 ab = b.xyz - a.xyz;
+                float ab2 = dot(ab, ab);
+                if (ab2 < 1e-4) continue;
+                vec3 ax = x - a.xyz;
+                float t = clamp(dot(ax, ab) / ab2, 0.0, 1.0);
+                vec3 closest = a.xyz + t * ab;
+                vec3 dE = x - closest;
+                float dE2 = dot(dE, dE);
+                if (dE2 > 0.10) continue;          // tube radius ≈ 0.32 M
+                // Tube cross-section: σ² = 0.006 (σ ≈ 0.077 M). Crisp lines.
+                float lineG = exp(-dE2 / 0.006);
+                if (lineG < 0.05) continue;
+                // Average corner radius and velocity → Doppler/redshift.
+                float rE     = 0.5 * (a.w + b.w);
+                float v_pE   = clamp(0.5 * (uParticleVel[ia] + uParticleVel[ib]),
+                                     -0.99, 0.99);
+                float fE     = 1.0 - 2.0 * uMass / max(rE, uMass * 2.05);
+                float fESqrt = sqrt(max(fE, 1e-3));
+                vec3  rHatE  = closest / max(length(closest), 1e-3);
+                float gammaE = 1.0 / sqrt(max(1.0 - v_pE*v_pE, 1e-4));
+                float dopE   = gammaE * (1.0 - v_pE * dot(rHatE, photonDir));
+                float D_E    = omegaCam * fESqrt / max(dopE, 1e-3);
+                float boostE = pow(D_E, 4.0);
+                float T_obsE = clamp(14000.0 * D_E, 600.0, 30000.0);
+                vec3  edgeCol = blackbodyRGB(T_obsE);
+                vec3  emitE   = edgeCol * boostE * lineG * dlPhys * 0.45;
+                float edgeA   = clamp(lineG * dlPhys * 0.4, 0.0, 0.85);
+                accumCol += emitE * (1.0 - accumA);
+                accumA   += edgeA * (1.0 - accumA);
+            }
+        }
     }
 
     vec3 background;
@@ -550,7 +771,7 @@ void main() {
         // black panel through the middle.
         bool treatAsEscaped = escaped || (length(x) > Rplus * 1.5);
         if (treatAsEscaped) {
-            background = sampleSky(normalize(p), nView);
+            background = sampleSky(normalize(p), omegaCam);
         } else {
             background = vec3(0.0);
         }
@@ -716,9 +937,8 @@ function setInclination(deg) {
     controls.update();
 }
 
-// Camera boost: fraction of c, applied tangentially along auto-orbit direction
-const boostState = { value: 0 };
-bindRange("rBoost", "vBoost", boostState, (v) => v.toFixed(2));
+// (Camera boost slider removed in gold-standard mode — observer 4-velocity
+// is now driven by uCamRadialV from the plunge state, not a manual knob.)
 
 // Auto-orbit / FOV / reset
 bindCheck("cAuto", { value: 0 }, 1.0, 0.0, (on) => { controls.autoRotate = on; });
@@ -730,9 +950,203 @@ bindRange("rFov", "vFov", { value: 0 }, (v) => v.toFixed(0), (v) => {
     uniforms.uTanFov.value = Math.tan((v * 0.5 * Math.PI) / 180);
 });
 $("bReset").addEventListener("click", () => {
+    plunge.active = false;
+    plunge.phase  = "idle";
+    controls.enabled = true;
     camera.position.set(0, 4.0, -17);
     controls.target.set(0, 0, 0);
+    // Restore FOV from slider in case plunge widened it.
+    const fovSlider = parseFloat($("rFov").value);
+    camera.fov = fovSlider;
+    camera.updateProjectionMatrix();
+    uniforms.uTanFov.value = Math.tan((fovSlider * 0.5 * Math.PI) / 180);
+    uniforms.uCameraBeta.value.set(0, 0, 0);
+    uniforms.uCamRadialV.value = 0.0;
+    renderer.toneMappingExposure = 1.0;
+    if (fadeEl) {
+        fadeEl.style.transition = "opacity 0.4s linear";
+        fadeEl.style.opacity    = "0";
+    }
+    if (hudEl) {
+        hudEl.style.transition = "opacity 0.3s linear";
+        hudEl.style.opacity    = "0";
+    }
     $("rIncl").value = 70;  $("rIncl").dispatchEvent(new Event("input"));
+});
+
+// Camera-plunge state. Free-fall radial geodesic in Schwarzschild, with the
+// physical proper-time speed v_r(r) = sqrt(2M/r) (fall from rest at infinity).
+// At r=18M that's β ≈ 0.33, accelerating to ≈1 at the horizon. We add a
+// modest tangential component (corkscrew) so the disk swings around the
+// camera, push FOV wider for "engulfed" feel, boost exposure to mimic
+// blueshift intensity gain (γ²), and overlay a live β/γ/r HUD. Black fade on
+// horizon crossing, then auto-restore.
+// ============ Spaghettification cube ============
+// 4×4×4 = 64 free-fall test particles arranged as a cube at spawn. Each
+// particle integrates its own radial geodesic from rest:
+//   d²r/dτ² = -M/r²   (Schwarzschild proper-time radial geodesic equals
+//                       Newton in this gauge — verified from the metric)
+// Velocity-Verlet / semi-implicit Euler (acceleration first, then position)
+// so the integration kicks off correctly from v=0. Inner particles
+// accelerate faster → cube stretches radially as it falls.
+const spag = {
+    particles:  [],          // {pos: Vec3, dir: Vec3, r: float, r0: float, v_r: float}
+    active:     false,
+    timeAccel: 10.0,         // proper-time / wall-second
+};
+
+// Click-to-drop: cast a ray from the camera through the clicked pixel;
+// spawn a 4×4×4 cube of test particles centered at the click point.
+function spawnSpaghetti(spawnCenter) {
+    spag.particles.length = 0;
+    spag.active = true;
+
+    // Orthonormal basis at spawn: radialOut = +r̂, t1/t2 perpendicular.
+    const radialOut = spawnCenter.clone().normalize();
+    const radialIn  = radialOut.clone().multiplyScalar(-1);
+    let helper = new THREE.Vector3(0, 1, 0);
+    if (Math.abs(radialOut.dot(helper)) > 0.95) helper.set(1, 0, 0);
+    const t1 = new THREE.Vector3().crossVectors(radialOut, helper).normalize();
+    const t2 = new THREE.Vector3().crossVectors(radialOut, t1).normalize();
+
+    // 4×4×4 = 64 particles, spacing 0.5 M → cube total side ≈ 1.5 M.
+    // Each axis: index k in [0..3], offset = (k - 1.5) * spacing.
+    const spacing = 0.5;
+    for (let k = 0; k < 4; k++) {
+        for (let j = 0; j < 4; j++) {
+            for (let i = 0; i < 4; i++) {
+                const radOff = (k - 1.5) * spacing;
+                const t1Off  = (i - 1.5) * spacing;
+                const t2Off  = (j - 1.5) * spacing;
+                const pos = spawnCenter.clone()
+                    .add(radialIn.clone().multiplyScalar(radOff))
+                    .add(t1.clone().multiplyScalar(t1Off))
+                    .add(t2.clone().multiplyScalar(t2Off));
+                const r = pos.length();
+                spag.particles.push({
+                    pos: pos,
+                    r:   r,
+                    r0:  r,                       // for diagnostic / display only
+                    v_r: 0,                       // start at rest
+                    dir: pos.clone().normalize(), // fixed angular direction
+                });
+            }
+        }
+    }
+}
+
+// Pure-radial gold-standard plunge. Free-fall from rest at infinity,
+// dr/dτ = −sqrt(2M/r). Updates uCamRadialV each frame so the shader's tetrad
+// uses the actual physical 4-velocity of the camera. No corkscrew, no FOV
+// ramp, no exposure boost, no look-back: the brightness/aberration changes
+// you see come entirely from the gold-standard tetrad math.
+const plunge = {
+    active:       false,
+    phase:        "idle",          // "falling" | "fading" | "idle"
+    phaseStart:   0,
+    fadeDuration: 1.0,
+    holdDur:      0.6,
+    startDir:     new THREE.Vector3(),
+    startR:       0,
+    currentR:     0,
+    targetR:      0,
+    timeAccel:    6.0,             // proper-time / wall-second
+};
+
+// Radial-redshift fade overlay for the horizon-crossing payoff. We ramp from
+// transparent → deep red → black: physically motivated because everything
+// the infalling observer sees from the receding hemisphere blueshifts away
+// to nothing, and the forward sky is the last bright thing as the shadow
+// closes around it.
+const fadeEl = document.createElement("div");
+fadeEl.id = "plungeFade";
+fadeEl.style.cssText = [
+    "position:fixed","top:0","left:0","width:100%","height:100%",
+    "background:radial-gradient(ellipse at center, rgba(0,0,0,0) 0%, rgba(40,0,0,1) 60%, rgba(0,0,0,1) 100%)",
+    "opacity:0","pointer-events:none",
+    "transition:opacity 0.2s linear","z-index:998",
+].join(";");
+document.body.appendChild(fadeEl);
+
+// Live β/γ/r HUD during the plunge (fades in/out with the dive).
+const hudEl = document.createElement("div");
+hudEl.id = "plungeHud";
+hudEl.style.cssText = [
+    "position:fixed","top:50%","right:24px","transform:translateY(-50%)",
+    "padding:14px 18px","border:1px solid rgba(255,120,120,0.35)",
+    "background:rgba(20,4,4,0.55)","border-radius:8px",
+    "font-family:ui-monospace,monospace","font-size:13px",
+    "color:#ffe0e0","line-height:1.55","letter-spacing:1px",
+    "box-shadow:0 0 28px rgba(255,80,80,0.25)","backdrop-filter:blur(4px)",
+    "pointer-events:none","opacity:0",
+    "transition:opacity 0.4s linear","z-index:999",
+    "min-width:130px","text-align:right",
+].join(";");
+hudEl.innerHTML = "";
+document.body.appendChild(hudEl);
+
+$("bPlunge").addEventListener("click", () => {
+    // If user is already very close, give them a real fall by pulling back.
+    const startR = Math.max(camera.position.length(), 14.0);
+    plunge.startR    = startR;
+    plunge.startDir  = (camera.position.lengthSq() > 0
+                        ? camera.position.clone().normalize()
+                        : new THREE.Vector3(0, 0.23, -0.97));
+    plunge.currentR  = startR;
+    // Schwarzschild horizon (a=0 in gold-standard mode).
+    const M  = uniforms.uMass.value;
+    const Rp = 2.0 * M;
+    plunge.targetR = Rp * 1.02;
+
+    camera.position.copy(plunge.startDir).multiplyScalar(startR);
+    camera.lookAt(0, 0, 0);
+
+    plunge.active     = true;
+    plunge.phase      = "falling";
+    plunge.phaseStart = performance.now() * 0.001;
+
+    controls.enabled = false;
+    if ($("cAuto").checked) {
+        $("cAuto").checked = false;
+        $("cAuto").dispatchEvent(new Event("change"));
+    }
+    fadeEl.style.transition = "opacity 0.2s linear";
+    fadeEl.style.opacity    = "0";
+    hudEl.style.transition  = "opacity 0.5s linear";
+    hudEl.style.opacity     = "1";
+});
+
+// ============ Click-to-drop spaghetti cube ============
+// Modifier-click on the canvas spawns a 0.4M cube of test particles at the
+// closest approach of the click ray to the BH (clamped to r ≥ 8M). Plain
+// click is reserved for OrbitControls (drag + dolly), so we use Shift+click
+// to disambiguate.
+canvas.addEventListener("click", (ev) => {
+    if (!ev.shiftKey) return;
+    const rect = canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+        ((ev.clientX - rect.left) / rect.width)  * 2 - 1,
+       -((ev.clientY - rect.top)  / rect.height) * 2 + 1,
+    );
+    // Build the world-space ray for that pixel.
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, camera);
+    const O = raycaster.ray.origin;
+    const D = raycaster.ray.direction.clone().normalize();
+
+    // Closest approach of the line {O + tD} to the BH at origin:
+    //   t* = -(O·D); minimum distance = |O - t* D| (perpendicular component).
+    // If the ray points away from the BH the closest approach is in the past;
+    // we still spawn at t = max(t*, 4) so the cube lands in front of the camera.
+    const tStar = -O.dot(D);
+    const t = Math.max(tStar, 4.0);
+    const point = new THREE.Vector3().copy(O).addScaledVector(D, t);
+    // Clamp to r ≥ 6M so spawn isn't already inside the photon sphere.
+    const r = point.length();
+    if (r < 6.0) {
+        point.multiplyScalar(6.0 / Math.max(r, 1e-3));
+    }
+    spawnSpaghetti(point);
 });
 
 // Sky URL
@@ -823,7 +1237,7 @@ function applyPreset(p) {
     set("rIncl", p.incl);
     set("rAo",   p.ao);   set("rFov", p.fov);
     set("rSteps", p.steps); set("rBloom", p.bloom);
-    set("rBoost", p.boost);
+    // p.boost ignored — boost slider removed in gold-standard mode.
     setC("cAuto", true);   setC("cDisk", true);
     controls.update();
 }
@@ -894,17 +1308,143 @@ function tick(now) {
 
     controls.update();
 
-    // Camera boost: along auto-orbit tangent (BH y-axis cross to position).
-    const beta = boostState.value;
-    if (beta > 1e-4) {
-        const r = camera.position.clone().normalize();
-        const tangent = new THREE.Vector3(-r.z, 0.0, r.x).normalize();
-        uniforms.uCameraBeta.value.copy(tangent.multiplyScalar(beta * 0.999));
+    // ---- Pure-radial gold-standard plunge ----
+    //
+    // Free-fall from rest at infinity: dr/dτ = −sqrt(2M/r).
+    // We update camera position by integrating r each frame, snap camera
+    // direction to lookAt(origin), and write uCamRadialV so the shader's
+    // tetrad uses the true physical 4-velocity. ALL relativistic effects
+    // (aberration, Doppler, gravitational redshift) come from the shader's
+    // tetrad math now — no JS-side cinematography (no FOV ramp, no exposure
+    // boost, no corkscrew, no look-back).
+    if (plunge.active) {
+        const M  = uniforms.uMass.value;
+        const Rp = 2.0 * M;
+
+        if (plunge.phase === "falling") {
+            const dtau  = dt * plunge.timeAccel;
+            const rSafe = Math.max(plunge.currentR, Rp * 1.001);
+            const v_r   = Math.min(0.998, Math.sqrt(2.0 * M / rSafe));
+            plunge.currentR = Math.max(plunge.currentR - v_r * dtau,
+                                       plunge.targetR);
+
+            camera.position.copy(plunge.startDir).multiplyScalar(plunge.currentR);
+            camera.lookAt(0, 0, 0);
+
+            // Signed radial velocity in +r̂: inward = negative. The shader's
+            // tetrad construction uses this scalar directly.
+            uniforms.uCamRadialV.value = -v_r;
+
+            const gamma = 1.0 / Math.sqrt(Math.max(1.0 - v_r * v_r, 1e-6));
+            hudEl.innerHTML =
+                "<span style='opacity:0.55;font-size:10px;letter-spacing:2px'>FREE FALL</span><br/>" +
+                "β = <b style='color:#ffd6b0'>" + v_r.toFixed(3) + "</b><br/>" +
+                "γ = <b style='color:#ffd6b0'>" + gamma.toFixed(2) + "</b><br/>" +
+                "r/M = <b style='color:#ffd6b0'>" + plunge.currentR.toFixed(2) + "</b>";
+
+            if (plunge.currentR <= plunge.targetR + 1e-3) {
+                plunge.phase      = "fading";
+                plunge.phaseStart = now * 0.001;
+                fadeEl.style.transition = "opacity " + plunge.fadeDuration + "s linear";
+                fadeEl.style.opacity    = "1";
+                hudEl.innerHTML +=
+                    "<br/><span style='opacity:0.55;font-size:10px;letter-spacing:2px;color:#ff8060'>" +
+                    "HORIZON</span>";
+            }
+        } else if (plunge.phase === "fading") {
+            // Camera held at horizon; fade to black, then restore.
+            uniforms.uCamRadialV.value = -0.998;
+            const elapsed = (now * 0.001) - plunge.phaseStart;
+            if (elapsed >= plunge.fadeDuration + plunge.holdDur) {
+                plunge.active = false;
+                plunge.phase  = "idle";
+                controls.enabled = true;
+                camera.position.copy(plunge.startDir).multiplyScalar(plunge.startR);
+                camera.lookAt(0, 0, 0);
+                uniforms.uCamRadialV.value = 0.0;
+                fadeEl.style.transition = "opacity 0.7s linear";
+                fadeEl.style.opacity    = "0";
+                hudEl.style.transition  = "opacity 0.4s linear";
+                hudEl.style.opacity     = "0";
+            }
+        }
     } else {
+        // No plunge: camera is static in BH rest frame. Tetrad sees vRad=0.
+        uniforms.uCamRadialV.value = 0.0;
+        // Legacy uCameraBeta stays zero — the gold-standard tetrad gets the
+        // observer's 4-velocity from uCamRadialV, not from this slider.
         uniforms.uCameraBeta.value.set(0, 0, 0);
     }
 
+    // ---- Spaghettification update ----
+    // Schwarzschild radial proper-time geodesic: d²r/dτ² = -M/r². Use
+    // semi-implicit Euler (update v first, then r) so motion bootstraps
+    // correctly from v=0 — the explicit `v(r) = √(2M(1/r-1/r0))` form gets
+    // stuck at r=r0 because v=0 there, which is what was happening before.
+    // Inner particles see slightly larger acceleration → radial stretching.
+    if (spag.active) {
+        const M    = uniforms.uMass.value;
+        const Rp   = 2.0 * M;
+        const dtau = dt * spag.timeAccel;
+        let alive  = 0;
+        let xMin = Infinity, yMin = Infinity, zMin = Infinity;
+        let xMax = -Infinity, yMax = -Infinity, zMax = -Infinity;
+        for (const pt of spag.particles) {
+            if (pt.r <= Rp * 1.02) continue;
+            const a = -M / (pt.r * pt.r);
+            pt.v_r += a * dtau;
+            // Cap speed at 0.99c so visualization stays sane near horizon
+            // (we're not modelling the full Schwarzschild correction here).
+            pt.v_r = Math.max(pt.v_r, -0.99);
+            pt.r += pt.v_r * dtau;
+            if (pt.r < Rp * 1.02) pt.r = Rp * 1.02;
+            pt.pos.copy(pt.dir).multiplyScalar(pt.r);
+            alive++;
+            if (pt.pos.x < xMin) xMin = pt.pos.x;
+            if (pt.pos.y < yMin) yMin = pt.pos.y;
+            if (pt.pos.z < zMin) zMin = pt.pos.z;
+            if (pt.pos.x > xMax) xMax = pt.pos.x;
+            if (pt.pos.y > yMax) yMax = pt.pos.y;
+            if (pt.pos.z > zMax) zMax = pt.pos.z;
+        }
+        // Pad the bounding box by the Gaussian half-width so rays grazing
+        // the cube edge still pick up emission.
+        const pad = 0.5;
+        uniforms.uPartBoxMin.value.set(xMin - pad, yMin - pad, zMin - pad);
+        uniforms.uPartBoxMax.value.set(xMax + pad, yMax + pad, zMax + pad);
+
+        // Pack the uniform arrays. Inactive slots get w=-1, vel=0.
+        for (let i = 0; i < 64; i++) {
+            const u = uniforms.uParticles.value[i];
+            if (i < spag.particles.length) {
+                const pt = spag.particles[i];
+                if (pt.r > Rp * 1.025) {
+                    u.set(pt.pos.x, pt.pos.y, pt.pos.z, pt.r);
+                    uniforms.uParticleVel.value[i] = pt.v_r;
+                } else {
+                    u.set(0, 0, 0, -1);
+                    uniforms.uParticleVel.value[i] = 0;
+                }
+            } else {
+                u.set(0, 0, 0, -1);
+                uniforms.uParticleVel.value[i] = 0;
+            }
+        }
+        uniforms.uNumParticles.value = spag.particles.length;
+        if (alive === 0) {
+            spag.active = false;
+            spag.particles.length = 0;
+            uniforms.uNumParticles.value = 0;
+        }
+    } else {
+        uniforms.uNumParticles.value = 0;
+    }
+
     uniforms.uTime.value = simT;
+    // Force matrixWorld refresh: when controls.enabled is false (plunge), or
+    // when we set camera.position/quaternion manually, OrbitControls.update()
+    // doesn't refresh the matrix and the shader reads last-frame's transform.
+    camera.updateMatrixWorld();
     uniforms.uCameraPos.value.copy(camera.position);
     uniforms.uCameraMat.value.copy(camera.matrixWorld);
 
