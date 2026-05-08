@@ -4,6 +4,13 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+*.prof
 
 # Manim
 media/
@@ -26,6 +33,22 @@ Thumbs.db
 assets/skyboxes/*.exr
 assets/skyboxes/*.hdr
 physics/_export/*.json
+
+# Video / audio captures (OBS recordings, demo dumps, manim escapees)
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.wav
+*.flac
+
+# Archives (downloaded asset bundles)
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
 
 # Local scaffolding (frill re-add backups, pre-rewrite snapshots)
 *.bak
