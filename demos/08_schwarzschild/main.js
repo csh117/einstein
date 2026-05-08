@@ -85,7 +85,7 @@ const uniforms = {
     uTanFov:      { value: Math.tan((camera.fov * 0.5 * Math.PI) / 180) },
     uMass:        { value: 1.0 },
     uSpin:        { value: 0.0 },        // a/M
-    uMaxSteps:    { value: 350 },
+    uMaxSteps:    { value: 600 },
     uTime:        { value: 0 },
     uShowDisk:    { value: 1.0 },
     uMdot:        { value: 1.0 },
@@ -1170,7 +1170,7 @@ bindRange("rBloom", "vBloom", { value: 0 }, (v) => v.toFixed(2),
           (v) => { bloomPass.strength = v; });
 
 // Render / time
-const stepsState = { value: 500 };
+const stepsState = { value: 600 };
 bindRange("rSteps", "vSteps", stepsState, (v) => v.toFixed(0),
           (v) => { uniforms.uMaxSteps.value = Math.round(v); });
 
@@ -1271,20 +1271,22 @@ document.querySelectorAll("[data-info]").forEach(attachTooltip);
 // -------- resize --------
 const stats = $("stats");
 function resize() {
-    const w  = window.innerWidth;
-    const h  = window.innerHeight;
-    const s  = resScale.value || 1.0;
-    const pr = renderer.getPixelRatio();
-    const W  = Math.round(w * pr * s);
-    const H  = Math.round(h * pr * s);
+    const w   = window.innerWidth;
+    const h   = window.innerHeight;
+    const s   = resScale.value || 1.0;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W   = Math.round(w * dpr * s);
+    const H   = Math.round(h * dpr * s);
 
-    renderer.setSize(w, h, false);
+    // Drive the renderer at its true pixel size (W×H) so the GL viewport
+    // matches the canvas. Setting pixelRatio=1 stops Three.js from
+    // multiplying again — we already folded dpr into W/H.
+    renderer.setPixelRatio(1);
+    renderer.setSize(W, H, false);
     composer.setSize(W, H);
     bloomPass.setSize(W, H);
 
     uniforms.uResolution.value.set(W, H);
-    renderer.domElement.width  = W;
-    renderer.domElement.height = H;
     renderer.domElement.style.width  = w + "px";
     renderer.domElement.style.height = h + "px";
 

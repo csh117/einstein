@@ -30,7 +30,11 @@ The demos are static sites. From the repo root:
 python -m http.server 8000
 ```
 
-Then open http://localhost:8000/demos/08_schwarzschild/
+Then open http://localhost:8000/demos/08_schwarzschild/ for the default WebGL build.
+
+For the **WebGPU build** (raw `wgsl`, RTX 5090-tuned), open
+http://localhost:8000/demos/08_schwarzschild/index.webgpu.html — same UI,
+same physics, lower driver overhead. Requires Chrome/Edge.
 
 ## Scene plan (10:00 total)
 
