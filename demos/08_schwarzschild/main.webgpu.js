@@ -356,6 +356,85 @@ fn rk4Step(x: ptr<function, vec3<f32>>, p: ptr<function, vec3<f32>>,
   *p = *p + dl * (k1.dp + 2.0*k2.dp + 2.0*k3.dp + k4.dp) / 6.0;
 }
 
+// ============ Kerr (Kerr-Schild Cartesian, spin axis = +y) ============
+// Real Kerr null geodesics, validated against physics/kerr.py (both the
+// Boyer-Lindquist and Kerr-Schild forms): reproduces the prograde/retrograde
+// photon-orbit radii, the frame-dragging shadow asymmetry ξ_± = ±3√(M·r_ph) − a,
+// and the Schwarzschild a=0 limit. Engaged only when |u.spin| > 0; a=0 keeps the
+// proven Schwarzschild integrator above untouched (no regression on existing shots).
+struct KSField { f: f32, l: vec3<f32> };
+
+fn ksRadius(x: vec3<f32>, a: f32) -> f32 {
+  // KS radius: positive root of r⁴ − (R²−a²)r² − a²y² = 0  (spin axis = y).
+  let R2 = dot(x, x);
+  let a2 = a * a;
+  let r2 = 0.5 * ((R2 - a2) + sqrt((R2 - a2) * (R2 - a2) + 4.0 * a2 * x.y * x.y));
+  return sqrt(max(r2, 1e-12));
+}
+
+fn ksField(x: vec3<f32>, M: f32, a: f32) -> KSField {
+  let r  = ksRadius(x, a);
+  let a2 = a * a;
+  let r2 = r * r;
+  var o: KSField;
+  o.f = 2.0 * M * r2 * r / (r2 * r2 + a2 * x.y * x.y);
+  o.l = vec3<f32>((r * x.x - a * x.z) / (r2 + a2),
+                  x.y / r,
+                  (r * x.z + a * x.x) / (r2 + a2));
+  return o;
+}
+
+// Position-dependent part of 2H for a conserved-E=1 photon: f·(1 + l·p)².
+// The constant (−1 + |p|²) drops out of the spatial gradient, so differencing
+// this well-conditioned O(f) term avoids f32 cancellation near the null cone.
+fn ksPot(x: vec3<f32>, p: vec3<f32>, M: f32, a: f32) -> f32 {
+  let fld = ksField(x, M, a);
+  let lp  = 1.0 + dot(fld.l, p);
+  return fld.f * lp * lp;
+}
+
+fn ksDeriv(x: vec3<f32>, p: vec3<f32>, M: f32, a: f32) -> Deriv {
+  let fld = ksField(x, M, a);
+  let lp  = 1.0 + dot(fld.l, p);        // l^μ p_μ  (E = 1)
+  var d: Deriv;
+  d.dx = p - fld.f * fld.l * lp;        // dx^i/dλ = g^{iμ} p_μ
+  let h  = max(2.0e-3 * ksRadius(x, a), 1.0e-3);
+  let gx = (ksPot(x + vec3<f32>(h,0.0,0.0), p, M, a) - ksPot(x - vec3<f32>(h,0.0,0.0), p, M, a)) / (2.0*h);
+  let gy = (ksPot(x + vec3<f32>(0.0,h,0.0), p, M, a) - ksPot(x - vec3<f32>(0.0,h,0.0), p, M, a)) / (2.0*h);
+  let gz = (ksPot(x + vec3<f32>(0.0,0.0,h), p, M, a) - ksPot(x - vec3<f32>(0.0,0.0,h), p, M, a)) / (2.0*h);
+  d.dp = 0.5 * vec3<f32>(gx, gy, gz);   // dp_i/dλ = −½ ∂_i(2H) = +½ ∂_i ksPot
+  return d;
+}
+
+fn rk4StepKS(x: ptr<function, vec3<f32>>, p: ptr<function, vec3<f32>>,
+             M: f32, a: f32, dl: f32)
+{
+  let k1 = ksDeriv(*x,                  *p,                  M, a);
+  let k2 = ksDeriv(*x + 0.5*dl*k1.dx,   *p + 0.5*dl*k1.dp,   M, a);
+  let k3 = ksDeriv(*x + 0.5*dl*k2.dx,   *p + 0.5*dl*k2.dp,   M, a);
+  let k4 = ksDeriv(*x + dl*k3.dx,       *p + dl*k3.dp,       M, a);
+  *x = *x + dl * (k1.dx + 2.0*k2.dx + 2.0*k3.dx + k4.dx) / 6.0;
+  *p = *p + dl * (k1.dp + 2.0*k2.dp + 2.0*k3.dp + k4.dp) / 6.0;
+}
+
+// Camera-ray init: a null photon at `cam` whose coordinate velocity points along
+// world direction `n`. Solves (f−1)v_t² + 2f(l·n)v_t + [1 + f(l·n)²] = 0 for the
+// future-directed root, then p_i = n_i + f l_i(v_t + l·n), E = v_t − f(v_t + l·n).
+// Returns vec4(p, E); reduces to (n, 1) at large r where f→0.
+fn ksCameraPhoton(cam: vec3<f32>, n: vec3<f32>, M: f32, a: f32) -> vec4<f32> {
+  let fld = ksField(cam, M, a);
+  let ln  = dot(fld.l, n);
+  let A   = fld.f - 1.0;
+  let B   = 2.0 * fld.f * ln;
+  let C   = 1.0 + fld.f * ln * ln;
+  let disc = max(B * B - 4.0 * A * C, 0.0);
+  var vt: f32;
+  if (abs(A) < 1e-9) { vt = -C / B; }
+  else               { vt = (-B - sqrt(disc)) / (2.0 * A); }
+  let lv = vt + ln;
+  return vec4<f32>(n + fld.f * fld.l * lv, vt - fld.f * lv);
+}
+
 // ============ main ray ============
 @fragment
 fn fs(@builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
@@ -405,12 +484,25 @@ fn fs(@builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
   let dir = vec3<f32>(pX, pY, pZ);
 
   let omegaCam = invE;
-  let a_spin = 0.0;  // gold-standard: pure Schwarzschild geodesics
+
+  // Spin axis = +y (disk normal). a=0 keeps the proven Schwarzschild integrator;
+  // |a|>0 switches to the validated Kerr-Schild geodesics (real frame dragging).
+  let aSpin = u.spin;
+  let kerr  = abs(aSpin) > 1e-4;
 
   var x = u.cameraPos;
   var p = dir;
+  if (kerr) {
+    // Re-init the photon for the Kerr metric and normalize to conserved E = 1
+    // (so the disk-Doppler omegaEm, which assumes E=1, stays consistent).
+    let pe = ksCameraPhoton(u.cameraPos, nView, u.mass, aSpin);
+    p = pe.xyz / max(pe.w, 1e-6);
+  }
 
-  let Rplus = 2.0 * u.mass;
+  // Horizon: Schwarzschild 2M, or the Kerr outer horizon r_+ = M + √(M²−a²).
+  let Rplus = select(2.0 * u.mass,
+                     u.mass + sqrt(max(u.mass * u.mass - aSpin * aSpin, 0.0)),
+                     kerr);
 
   var captured = false;
   var escaped  = false;
@@ -423,15 +515,20 @@ fn fs(@builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
     if (accumA > 0.99)   { break; }
 
     let r = length(x);
-    if (r < Rplus * 1.001) { captured = true; break; }
-    if (r > FAR)           { escaped  = true; break; }
+    // Capture on the true horizon radius: Cartesian |x| for Schwarzschild, but the
+    // KS radius for Kerr (|x| = √(r²+a²) in the equatorial plane, so testing |x|
+    // would mis-place the shadow edge — the headline Kerr feature).
+    let rCap = select(r, ksRadius(x, aSpin), kerr);
+    if (rCap < Rplus * 1.001) { captured = true; break; }
+    if (r > FAR)              { escaped  = true; break; }
 
     let dl = clamp(r * 0.10, 0.04, 0.7);
 
     let prev_x = x;
     let prev_p = p;
 
-    rk4Step(&x, &p, u.mass, a_spin, dl);
+    if (kerr) { rk4StepKS(&x, &p, u.mass, aSpin, dl); }
+    else      { rk4Step(&x, &p, u.mass, 0.0, dl); }
 
     // Equatorial-plane crossing: disk + hotspot
     let wantEquatorial = (u.showDisk > 0.5 || u.hot > 0.5);
@@ -444,10 +541,10 @@ fn fs(@builtin(position) fragPos: vec4<f32>) -> @location(0) vec4<f32> {
 
       let Lz = hit.z * pHit.x - hit.x * pHit.z;
 
-      let Omega  = u.spinDir / (pow(rd, 1.5)/sqrt(u.mass) + u.spinDir * a_spin);
+      let Omega  = u.spinDir / (pow(rd, 1.5)/sqrt(u.mass) + u.spinDir * aSpin);
       let gtt0   = 1.0 - 2.0*u.mass/rd;
-      let gtp0   = -2.0*u.mass*a_spin/rd;
-      let gpp0   = (rd*rd + a_spin*a_spin + 2.0*u.mass*a_spin*a_spin/rd);
+      let gtp0   = -2.0*u.mass*aSpin/rd;
+      let gpp0   = (rd*rd + aSpin*aSpin + 2.0*u.mass*aSpin*aSpin/rd);
       let denomU = max(gtt0 - 2.0*Omega*(-gtp0) - Omega*Omega*gpp0, 1e-3);
       let u_t    = 1.0 / sqrt(denomU);
       let u_p    = Omega * u_t;
@@ -846,89 +943,103 @@ const uniformAB = new ArrayBuffer(UNIFORM_SIZE);
 const uniformF32 = new Float32Array(uniformAB);
 const uniformI32 = new Int32Array(uniformAB);
 
+// Single source of truth for the WGSL `struct U` storage-buffer layout.
+// Each entry is { word, type, get|ref } where `word` is the f32-word offset
+// (byte offset / 4) and MUST match the corresponding member of `struct U` in
+// SHADER_BH above. packUniforms() and the assert below both derive from this
+// one list — there are no hand-numbered indices in the packer anymore, so a
+// field added to the struct but not here (or vice-versa) fails loudly at load
+// instead of silently shifting every later field and corrupting a frame.
+// vec3/mat4 take 16-byte (4-word) alignment; an f32 declared right after a vec3
+// legitimately occupies that vec3's trailing pad slot (e.g. spin after cameraPos).
+const UNIFORM_WORDS = 64; // 256-byte buffer (UNIFORM_SIZE / 4)
+const UNIFORM_FIELDS = [
+    { word:  0, type: 'f32',  get: () => u.resolutionX },          // resolution.x
+    { word:  1, type: 'f32',  get: () => u.resolutionY },          // resolution.y
+    { word:  2, type: 'f32',  get: () => u.tanFov },
+    { word:  3, type: 'f32',  get: () => u.mass },
+    { word:  4, type: 'vec3', ref: () => u.cameraPos },
+    { word:  7, type: 'f32',  get: () => u.spin },  // drives Kerr geodesics + disk ISCO
+    { word:  8, type: 'mat4', ref: () => u.cameraMat },            // column-major 4x4
+    { word: 24, type: 'vec3', ref: () => u.cameraBeta, dead: 'never read in shader' },
+    { word: 27, type: 'f32',  get: () => u.camRadialV },
+    { word: 28, type: 'f32',  get: () => u.bhScreenX },            // bhScreen.x
+    { word: 29, type: 'f32',  get: () => u.bhScreenY },            // bhScreen.y
+    { word: 30, type: 'f32',  get: () => u.bhDist },
+    { word: 31, type: 'f32',  get: () => u.time },
+    { word: 32, type: 'f32',  get: () => u.showDisk },
+    { word: 33, type: 'f32',  get: () => u.mdot },
+    { word: 34, type: 'f32',  get: () => u.diskInner },
+    { word: 35, type: 'f32',  get: () => u.diskOuter },
+    { word: 36, type: 'f32',  get: () => u.diskH },
+    { word: 37, type: 'f32',  get: () => u.spinDir },
+    { word: 38, type: 'f32',  get: () => u.tau },
+    { word: 39, type: 'f32',  get: () => u.tpeakK },
+    { word: 40, type: 'f32',  get: () => u.skyRot },
+    { word: 41, type: 'f32',  get: () => u.hot },
+    { word: 42, type: 'f32',  get: () => u.hotR },
+    { word: 43, type: 'f32',  get: () => u.hotW },
+    { word: 44, type: 'f32',  get: () => u.hotBrt },
+    { word: 45, type: 'f32',  get: () => u.hotPhi },
+    { word: 46, type: 'f32',  get: () => u.jet },
+    { word: 47, type: 'f32',  get: () => u.jetBeta },
+    { word: 48, type: 'f32',  get: () => u.jetAngle },
+    { word: 49, type: 'f32',  get: () => u.jetLen },
+    { word: 50, type: 'f32',  get: () => u.jetBrt },
+    { word: 51, type: 'f32',  get: () => u.showPRing },
+    { word: 52, type: 'vec3', ref: () => u.partBoxMin },
+    { word: 55, type: 'i32',  get: () => u.numParticles },
+    { word: 56, type: 'vec3', ref: () => u.partBoxMax },
+    { word: 59, type: 'i32',  get: () => u.hasSky },
+    { word: 60, type: 'i32',  get: () => u.maxSteps },
+    // words 61..63: tail padding (_pad0/_pad1/_pad2), zeroed in packUniforms()
+];
+
+// Validate the layout once at load: catches overlaps, buffer overflow, and
+// vec3/mat4 misalignment. A future desync between this table and `struct U`
+// throws here, at startup, rather than silently mis-rendering the showpiece.
+(function assertUniformLayout() {
+    const SPAN = { f32: 1, i32: 1, vec3: 3, mat4: 16 };
+    const used = new Array(UNIFORM_WORDS).fill(null);
+    for (const f of UNIFORM_FIELDS) {
+        const span = SPAN[f.type];
+        if (span === undefined) throw new Error(`uniform layout: unknown type '${f.type}'`);
+        const align = (f.type === 'vec3' || f.type === 'mat4') ? 4 : 1;
+        if (f.word % align !== 0)
+            throw new Error(`uniform layout: ${f.type} @word ${f.word} is not ${align * 4}-byte aligned`);
+        for (let i = 0; i < span; i++) {
+            const w = f.word + i;
+            if (w >= UNIFORM_WORDS)
+                throw new Error(`uniform layout: field @word ${f.word} overflows ${UNIFORM_WORDS} words`);
+            if (used[w] !== null)
+                throw new Error(`uniform layout: word ${w} claimed by both @${used[w]} and @${f.word}`);
+            used[w] = f.word;
+        }
+    }
+})();
+
 function packUniforms() {
-    // Layout offsets (in floats):
-    //   0..1   resolution
-    //   2      tanFov
-    //   3      mass
-    //   4..6   cameraPos    (vec3 padded to 16: 4..7)
-    //   7      spin
-    //   8..23  cameraMat (4x4 column-major)
-    //  24..26  cameraBeta   (24..27 padded)
-    //  27      camRadialV
-    //  28..29  bhScreen
-    //  30      bhDist
-    //  31      time
-    //  32..35  showDisk, mdot, diskInner, diskOuter
-    //  36..39  diskH, spinDir, tau, tpeakK
-    //  40..43  skyRot, hot, hotR, hotW
-    //  44..47  hotBrt, hotPhi, jet, jetBeta
-    //  48..51  jetAngle, jetLen, jetBrt, showPRing
-    //  52..54  partBoxMin    [55] = numParticles (i32)
-    //  56..58  partBoxMax    [59] = hasSky (i32)
-    //  60      maxSteps (i32) [61..63] padding
-
-    uniformF32[0] = u.resolutionX;
-    uniformF32[1] = u.resolutionY;
-    uniformF32[2] = u.tanFov;
-    uniformF32[3] = u.mass;
-    uniformF32[4] = u.cameraPos.x;
-    uniformF32[5] = u.cameraPos.y;
-    uniformF32[6] = u.cameraPos.z;
-    uniformF32[7] = u.spin;
-
-    const m = u.cameraMat.elements; // column-major float32[16]
-    for (let i = 0; i < 16; i++) uniformF32[8 + i] = m[i];
-
-    uniformF32[24] = u.cameraBeta.x;
-    uniformF32[25] = u.cameraBeta.y;
-    uniformF32[26] = u.cameraBeta.z;
-    uniformF32[27] = u.camRadialV;
-
-    uniformF32[28] = u.bhScreenX;
-    uniformF32[29] = u.bhScreenY;
-    uniformF32[30] = u.bhDist;
-    uniformF32[31] = u.time;
-
-    uniformF32[32] = u.showDisk;
-    uniformF32[33] = u.mdot;
-    uniformF32[34] = u.diskInner;
-    uniformF32[35] = u.diskOuter;
-
-    uniformF32[36] = u.diskH;
-    uniformF32[37] = u.spinDir;
-    uniformF32[38] = u.tau;
-    uniformF32[39] = u.tpeakK;
-
-    uniformF32[40] = u.skyRot;
-    uniformF32[41] = u.hot;
-    uniformF32[42] = u.hotR;
-    uniformF32[43] = u.hotW;
-
-    uniformF32[44] = u.hotBrt;
-    uniformF32[45] = u.hotPhi;
-    uniformF32[46] = u.jet;
-    uniformF32[47] = u.jetBeta;
-
-    uniformF32[48] = u.jetAngle;
-    uniformF32[49] = u.jetLen;
-    uniformF32[50] = u.jetBrt;
-    uniformF32[51] = u.showPRing;
-
-    uniformF32[52] = u.partBoxMin.x;
-    uniformF32[53] = u.partBoxMin.y;
-    uniformF32[54] = u.partBoxMin.z;
-    uniformI32[55] = u.numParticles | 0;
-
-    uniformF32[56] = u.partBoxMax.x;
-    uniformF32[57] = u.partBoxMax.y;
-    uniformF32[58] = u.partBoxMax.z;
-    uniformI32[59] = u.hasSky | 0;
-
-    uniformI32[60] = u.maxSteps | 0;
-    uniformF32[61] = 0;
-    uniformF32[62] = 0;
-    uniformF32[63] = 0;
+    for (const f of UNIFORM_FIELDS) {
+        switch (f.type) {
+            case 'f32': uniformF32[f.word] = f.get(); break;
+            case 'i32': uniformI32[f.word] = f.get() | 0; break;
+            case 'vec3': {
+                const v = f.ref();
+                uniformF32[f.word]     = v.x;
+                uniformF32[f.word + 1] = v.y;
+                uniformF32[f.word + 2] = v.z;
+                break;
+            }
+            case 'mat4': {
+                const e = f.ref().elements; // column-major float32[16]
+                for (let i = 0; i < 16; i++) uniformF32[f.word + i] = e[i];
+                break;
+            }
+        }
+    }
+    uniformF32[61] = 0; // _pad0
+    uniformF32[62] = 0; // _pad1
+    uniformF32[63] = 0; // _pad2
 }
 
 // -------- UI bindings (mirror main.js) --------
