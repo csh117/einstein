@@ -1,0 +1,6 @@
+# This repo lives on a Windows drive accessed from WSL, so editors can silently
+# rewrite LF -> CRLF and produce whole-file "diffs" that are pure line-ending
+# churn (e.g. demos/08_schwarzschild/main.js showing 1483 changed lines that
+# vanish under `git diff --ignore-all-space`). Force LF in the repo for all text
+# so that never shows up as a change again.
+* text=auto eol=lf
