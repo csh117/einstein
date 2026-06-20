@@ -368,11 +368,6 @@ function placeOverlayAt(el, worldX, worldZ, screenYOffset = 0) {
     el.style.top  = (sy + screenYOffset) + "px";
 }
 
-// keep old call site working
-function placeLabelAt(el, worldX, screenYOffset) {
-    placeOverlayAt(el, worldX, 0, screenYOffset);
-}
-
 // -------- UI bindings --------
 const $ = (id) => document.getElementById(id);
 

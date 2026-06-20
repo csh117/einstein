@@ -1,2 +1,5 @@
+# ASPIRATIONAL — no manim scenes exist in this directory yet (the narration
+# layer is planned, not built; see README scene plan). Pinned here so the
+# environment is ready when scene work starts. Until then, nothing imports these.
 manim>=0.18
 numpy>=1.26

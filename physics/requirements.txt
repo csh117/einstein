@@ -1,5 +1,5 @@
+# Runtime deps for the reference physics layer (physics/schwarzschild.py).
+# Only numpy + scipy are imported; keep this list to what the code actually uses.
+# (matplotlib/plotly/sympy were declared but never imported — removed 2026-06-19.)
 numpy>=1.26
 scipy>=1.13
-matplotlib>=3.8
-plotly>=5.22
-sympy>=1.12

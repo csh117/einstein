@@ -1,0 +1,5 @@
+# Test-only deps. Kept out of requirements.txt so the runtime install stays lean.
+#   pip install -r physics/requirements.txt -r physics/requirements-dev.txt
+#   pytest physics/            (or: python physics/test_schwarzschild.py)
+-r requirements.txt
+pytest>=8.0

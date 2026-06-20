@@ -56,3 +56,4 @@ physics/_export/*.json
 
 # Claude Code local settings (per-user)
 .claude/settings.local.json
+.claude/audit-sessions/

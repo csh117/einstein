@@ -76,15 +76,6 @@ const groundLine = makeLine(
 );
 sceneL.add(groundLine);
 
-// Vertical reference rails to make 'parallel' visually obvious
-const railMatL = new THREE.LineBasicMaterial({ color: 0x223047, transparent: true, opacity: 0.55 });
-function addRailL(x) {
-    const g = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(x, -0.5, 0), new THREE.Vector3(x, 5, 0),
-    ]);
-    sceneL.add(new THREE.Line(g, railMatL));
-}
-
 // -------- right pane (real radial gravity) --------
 const earthR = makeDisk(1.0, 0x2a4a72, 0.9, 64);
 sceneR.add(earthR);

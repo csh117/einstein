@@ -13,13 +13,15 @@ A 10-minute hybrid explainer of Special and General Relativity for curious 9-yea
 ## Repo layout
 
 ```
-physics/                   Python: trajectory/metric math, validates shaders
+physics/                   Python: reference geodesic + tetrad math
+                           (test_schwarzschild.py asserts the shader's
+                           analytic limits; rays.json export not yet consumed)
 demos/                     Three.js + GLSL/WGSL interactive shader scenes
   08_schwarzschild/        Black-hole geodesic ray-marcher (showpiece)
   ...                      Other scenes added as we go
-manim/                     Narration scenes, equations, diagrams
-assets/                    Skyboxes, blackbody spectra
-edit/                      Cut sheet, OBS capture list
+manim/                     Narration scenes (planned — only requirements.txt so far)
+assets/                    Skyboxes, blackbody spectra (planned — not in repo yet)
+edit/                      Cut sheet, OBS capture list (planned — not in repo yet)
 ```
 
 ## Running a demo
@@ -30,11 +32,22 @@ The demos are static sites. From the repo root:
 python -m http.server 8000
 ```
 
-Then open http://localhost:8000/demos/08_schwarzschild/ for the default WebGL build.
+Then open http://localhost:8000/demos/08_schwarzschild/ for the WebGL fallback build.
 
 For the **WebGPU build** (raw `wgsl`, RTX 5090-tuned), open
-http://localhost:8000/demos/08_schwarzschild/index.webgpu.html — same UI,
-same physics, lower driver overhead. Requires Chrome/Edge.
+http://localhost:8000/demos/08_schwarzschild/index.webgpu.html — the same scene
+and UI ported to raw WGSL for lower driver overhead. Requires Chrome/Edge.
+
+> **Capture target:** the **WebGPU build** (`main.webgpu.js`) is the canonical
+> render path for the final film — it's the RTX 5090-tuned port and gets the
+> physics/tuning work first. The WebGL build (`main.js`) is the secondary
+> "works-everywhere" teaching build and may lag in tuning; don't assume the two
+> stay pixel-identical.
+>
+> The WebGPU build integrates **real Kerr null geodesics** (Kerr-Schild Cartesian,
+> validated against `physics/kerr.py`): the spin slider bends light with true
+> frame dragging — the photon ring goes asymmetric and the shadow shifts as spin
+> increases. The WebGL build's spin slider only adjusts the disk's inner edge.
 
 ## Scene plan (10:00 total)
 
