@@ -417,8 +417,8 @@ fn rk4StepKS(x: ptr<function, vec3<f32>>, p: ptr<function, vec3<f32>>,
   *p = *p + dl * (k1.dp + 2.0*k2.dp + 2.0*k3.dp + k4.dp) / 6.0;
 }
 
-// Camera-ray init: a null photon at `cam` whose coordinate velocity points along
-// world direction `n`. Solves (f−1)v_t² + 2f(l·n)v_t + [1 + f(l·n)²] = 0 for the
+// Camera-ray init: a null photon at 'cam' whose coordinate velocity points along
+// world direction 'n'. Solves (f−1)v_t² + 2f(l·n)v_t + [1 + f(l·n)²] = 0 for the
 // future-directed root, then p_i = n_i + f l_i(v_t + l·n), E = v_t − f(v_t + l·n).
 // Returns vec4(p, E); reduces to (n, 1) at large r where f→0.
 fn ksCameraPhoton(cam: vec3<f32>, n: vec3<f32>, M: f32, a: f32) -> vec4<f32> {
